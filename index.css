@@ -5,22 +5,7 @@
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 }
 
-/* Strict Horizontal Mode (Landscape) */
-@media screen and (orientation: portrait) {
 
-  body {
-    transform: rotate(90deg);
-    transform-origin: 50vw 50vw;
-    width: 100vh;
-    height: 100vw;
-    position: fixed;
-    top: 50vh;
-    left: 50vw;
-    margin-top: -50vw;
-    margin-left: -50vh;
-    overflow: hidden;
-  }
-}
 
 @keyframes shake {
   0% { transform: translate(1px, 1px) rotate(0deg); }

@@ -49,8 +49,14 @@ class GraphicEngine {
   }
 
   private init() {
+    let w = window.innerWidth;
+    let h = window.innerHeight;
+    if (w < h) {
+      [w, h] = [h, w];
+    }
+
     this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, powerPreference: "high-performance" });
-    this.renderer.setSize(window.innerWidth, window.innerHeight);
+    this.renderer.setSize(w, h);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.autoClear = false;
 
@@ -59,11 +65,11 @@ class GraphicEngine {
     // Dark brown/reddish sci-fi planetary fog fitting the theme
     this.scene.fog = new THREE.FogExp2(0x1a1512, 0.0003);
 
-    this.camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 25000);
+    this.camera = new THREE.PerspectiveCamera(60, w / h, 0.1, 25000);
     this.camera.position.set(0, 50, 0);
 
     this.fgScene = new THREE.Scene();
-    this.fgCamera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 100);
+    this.fgCamera = new THREE.PerspectiveCamera(60, w / h, 0.1, 100);
     this.fgCamera.position.set(0, 5, 15);
     this.fgCamera.lookAt(0, 0, 0);
 
@@ -343,8 +349,11 @@ class GraphicEngine {
   };
 
   private onWindowResize = () => {
-    const w = window.innerWidth;
-    const h = window.innerHeight;
+    let w = window.innerWidth;
+    let h = window.innerHeight;
+    if (w < h) {
+      [w, h] = [h, w];
+    }
     this.renderer.setSize(w, h);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
@@ -449,7 +458,7 @@ export default function App() {
   const resetJoyRight = () => engineRef.current?.setInput({ roll: 0, pitch: 0 });
 
   return (
-    <div className="w-full h-screen bg-[#0D0E10] text-white overflow-hidden select-none touch-none font-mono">
+    <div id="app-root" className="w-full h-full bg-[#0D0E10] text-white overflow-hidden select-none touch-none font-mono relative">
       
       {appState === 'AUTH' && (
         <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#0D0E10] z-50 p-6">
@@ -562,22 +571,40 @@ export default function App() {
       )}
       
       <style>{`
+        html, body, #root {
+          width: 100vw !important;
+          height: 100vh !important;
+          margin: 0 !important;
+          padding: 0 !important;
+          overflow: hidden !important;
+          background-color: #0D0E10;
+        }
+
+        #app-root {
+          width: 100vw;
+          height: 100vh;
+          position: absolute;
+          left: 0;
+          top: 0;
+        }
+
         .animate-spin-slow {
           animation: spin 20s linear infinite;
         }
+        
         @keyframes spin {
           from { transform: rotate(0deg); }
           to { transform: rotate(360deg); }
         }
+
         @media screen and (orientation: portrait) {
-            .force-landscape {
-                transform: rotate(-90deg);
-                transform-origin: left top;
+            #app-root {
                 width: 100vh !important;
                 height: 100vw !important;
                 position: absolute;
-                top: 100%;
-                left: 0;
+                left: 50% !important;
+                top: 50% !important;
+                transform: translate(-50%, -50%) rotate(90deg) !important;
             }
         }
       `}</style>
