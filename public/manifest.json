@@ -1,0 +1,17 @@
+{
+  "name": "TANKEEL SGMW",
+  "short_name": "Tankeel",
+  "description": "Galactic Defense Protocol",
+  "start_url": "/",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#050810",
+  "theme_color": "#00FFFF",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect width=%22100%22 height=%22100%22 fill=%22%23050810%22/><circle cx=%2250%22 cy=%2250%22 r=%2240%22 stroke=%22%2300FFFF%22 stroke-width=%225%22 fill=%22none%22/></svg>",
+      "sizes": "192x192",
+      "type": "image/svg+xml"
+    }
+  ]
+}

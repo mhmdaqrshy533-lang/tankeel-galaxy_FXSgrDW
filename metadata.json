@@ -1,0 +1,8 @@
+{
+  "name": "Tankeel | تنكيل",
+  "description": "Navigate a complex 3d world with customizable interactions.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
