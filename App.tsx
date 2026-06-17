@@ -2,747 +2,515 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import * as THREE from 'three';
 
 // --------------------------------------------------------
-// LANDSCAPE GUARD (FORCE ORIENTATION)
+// CORE GUARD & PERSISTENT STORAGE
 // --------------------------------------------------------
 const LandscapeGuard = () => {
-    const [isPortrait, setIsPortrait] = useState(window.innerHeight > window.innerWidth);
+    const [warn, setWarn] = useState(window.innerHeight > window.innerWidth);
     useEffect(() => {
-        const handleResize = () => setIsPortrait(window.innerHeight > window.innerWidth);
-        window.addEventListener('resize', handleResize);
-        return () => window.removeEventListener('resize', handleResize);
+        const handle = () => setWarn(window.innerHeight > window.innerWidth);
+        window.addEventListener('resize', handle);
+        return () => window.removeEventListener('resize', handle);
     }, []);
-
-    if (!isPortrait) return null;
+    if (!warn) return null;
     return (
-        <div className="fixed inset-0 z-[9999] bg-black text-white flex flex-col items-center justify-center p-8 text-center text-xl font-bold font-mono">
-            <div className="animate-pulse text-red-500 border border-red-500 p-8 shadow-[0_0_20px_rgba(255,0,0,0.5)]">
-                يرجى تدوير الجهاز - النظام يعمل بالوضع الأفقي التكتيكي فقط
+        <div className="fixed inset-0 z-[9999] bg-black text-white flex flex-col items-center justify-center p-8 text-center text-2xl font-bold font-mono">
+            <div className="animate-pulse text-red-500 border-2 border-red-500 p-12 bg-red-900/20 shadow-[0_0_50px_rgba(255,0,0,0.5)] leading-relaxed">
+                تحذير أمني: النظام مغلق تكتيكياً<br /><br />
+                يرجى تدوير الشاشة للوضع الأفقي للتشغيل الحركي
             </div>
         </div>
     );
 };
 
-// --------------------------------------------------------
-// CONFIG & PERSISTENCE
-// --------------------------------------------------------
-const CORE_KEY = "SGRD-99X-HAZBARI";
-const MASTER_CARD = "SHARAB-GOLD-V11";
-
-const usePlayerSave = () => {
-    const [save, setSave] = useState(() => {
-        try {
-             const s = localStorage.getItem('DRONE_STRIKE_SAVE');
-             return s ? JSON.parse(s) : { credits: 0, skin: 'STANDARD', score: 0 };
-        } catch { return { credits: 0, skin: 'STANDARD', score: 0 }; }
+function useGameState<T>(key: string, initial: T) {
+    const [val, setVal] = useState<T>(() => {
+        try { const item = localStorage.getItem(key); return item ? JSON.parse(item) : initial; } 
+        catch { return initial; }
     });
-    
-    useEffect(() => {
-        localStorage.setItem('DRONE_STRIKE_SAVE', JSON.stringify(save));
-    }, [save]);
-
-    return [save, setSave] as const;
-};
+    const setLocal = (v: T | ((curr: T) => T)) => {
+        try {
+            const nv = v instanceof Function ? v(val) : v;
+            setVal(nv); localStorage.setItem(key, JSON.stringify(nv));
+        } catch {}
+    };
+    return [val, setLocal] as const;
+}
 
 // --------------------------------------------------------
 // MATH & PROCEDURAL NOISE
 // --------------------------------------------------------
-const p = new Uint8Array(512);
-let seed = 12345;
+let PRNG_SEED = 12345;
 function random() {
-    seed = (seed * 1664525 + 1013904223) % 4294967296;
-    return seed / 4294967296;
+    PRNG_SEED = (PRNG_SEED * 1664525 + 1013904223) % 4294967296;
+    return PRNG_SEED / 4294967296;
 }
-for (let i = 0; i < 256; i++) {
-  p[i] = Math.floor(random() * 256);
-  p[i + 256] = p[i];
-}
+const p = new Uint8Array(512);
+for (let i = 0; i < 256; i++) { p[i] = Math.floor(random() * 256); p[i + 256] = p[i]; }
 function fade(t: number) { return t * t * t * (t * (t * 6 - 15) + 10); }
 function lerp(t: number, a: number, b: number) { return a + t * (b - a); }
 function grad(hash: number, x: number, y: number) {
-  const h = hash & 3; 
-  let u = h < 2 ? x : y; 
-  let v = h < 2 ? y : x;
-  return ((h & 1) ? -u : u) + ((h & 2) ? -2.0 * v : 2.0 * v);
+    const h = hash & 3; let u = h < 2 ? x : y; let v = h < 2 ? y : x;
+    return ((h & 1) ? -u : u) + ((h & 2) ? -2.0 * v : 2.0 * v);
 }
 function noise2D(x: number, y: number) {
-  let X = Math.floor(x) & 255; let Y = Math.floor(y) & 255;
-  x -= Math.floor(x); y -= Math.floor(y);
-  let u = fade(x); let v = fade(y);
-  let A = p[X] + Y, B = p[X + 1] + Y;
-  return lerp(v, lerp(u, grad(p[A], x, y), grad(p[B], x - 1, y)),
-                 lerp(u, grad(p[A + 1], x, y - 1), grad(p[B + 1], x - 1, y - 1)));
+    let X = Math.floor(x) & 255; let Y = Math.floor(y) & 255;
+    x -= Math.floor(x); y -= Math.floor(y);
+    let u = fade(x); let v = fade(y);
+    let A = p[X] + Y, B = p[X + 1] + Y;
+    return lerp(v, lerp(u, grad(p[A], x, y), grad(p[B], x - 1, y)),
+        lerp(u, grad(p[A + 1], x, y - 1), grad(p[B + 1], x - 1, y - 1)));
 }
-function fBm(x: number, z: number) {
-  let val = 0; let amp = 1; let freq = 0.002;
-  for (let i = 0; i < 4; i++) {
-    val += noise2D(x * freq, z * freq) * amp;
-    amp *= 0.5; freq *= 2.0;
-  }
-  return val * 400; 
+function fBm(x: number, z: number, oct = 4, f = 0.002) {
+    let val = 0; let amp = 1;
+    for (let i = 0; i < oct; i++) { val += noise2D(x * f, z * f) * amp; amp *= 0.5; f *= 2.0; }
+    return val * 400;
 }
 
 // --------------------------------------------------------
-// WEBGL TACTICAL ENGINE
+// TACTICAL ENGINE
 // --------------------------------------------------------
-type EntityType = 'TANK' | 'ALIEN' | 'SOLDIER';
-type ViewMode = 'DRONE_EARTH' | 'DRONE_SPACE' | 'GROUND_FPS';
-
-interface Entity {
-    id: number;
-    type: EntityType;
+interface Target {
     mesh: THREE.Object3D;
+    type: string;
     hp: number;
-    maxHp: number;
     active: boolean;
-    velocity?: THREE.Vector3;
+    vz?: number;
+    vx?: number;
 }
 
 class TacticalEngine {
-    public canvas: HTMLCanvasElement;
     public renderer: THREE.WebGLRenderer;
     public scene: THREE.Scene;
     public camera: THREE.PerspectiveCamera;
     
-    public clock: THREE.Clock;
-    public state = {
-        view: 'DRONE_EARTH' as ViewMode,
-        dronePos: new THREE.Vector3(0, 3000, 0),
-        fpsPos: new THREE.Vector3(0, 0, 0),
-        fpsYaw: 0, fpsPitch: 0,
-        inputL: {x: 0, y: 0},
-        inputR: {x: 0, y: 0},
-        health: 100, ammo: 300, score: 0,
-        recoil: 0,
-        flashAlpha: 0,
-        hitMarker: 0,
-    };
-    
-    public trackingMissile: { mesh: THREE.Mesh, light: THREE.PointLight } | null = null;
-    public bullets: { mesh: THREE.Mesh, vel: THREE.Vector3, life: number, type: 'MISSILE' | 'LASER' | 'BULLET', pSystem?: THREE.Points }[] = [];
-    public entities: Entity[] = [];
-    public clouds!: THREE.Points;
-    
-    public onSyncHUD: (data: any) => void = () => {};
-    public alienOverlayRef: HTMLDivElement | null = null;
-
     public rtTexture: THREE.WebGLRenderTarget;
     public postScene: THREE.Scene;
     public postCamera: THREE.OrthographicCamera;
     public postMaterial: THREE.ShaderMaterial;
 
-    public gunScene: THREE.Scene;
-    public gunCamera: THREE.PerspectiveCamera;
-    public gunMesh: THREE.Group;
+    private clock = new THREE.Clock();
+    private targets: Target[] = [];
+    private explosions: { mesh: THREE.Points, vels: THREE.Vector3[], life: number }[] = [];
+    
+    private basePos = new THREE.Vector3(0, 0, 0);
+    public inputL = { x: 0, y: 0 };
+    private shakeTime = 0;
+    private viewMode = 1; // 1 = FLIR
 
-    constructor(canvas: HTMLCanvasElement, initialView: ViewMode, alienOverlayRef: HTMLDivElement | null) {
-        this.canvas = canvas;
-        this.state.view = initialView;
-        this.alienOverlayRef = alienOverlayRef;
+    public waterMesh?: THREE.Mesh;
+    public onKill?: (g: number, d: number, s: number) => void;
+
+    constructor(canvas: HTMLCanvasElement, envType: string) {
         const w = window.innerWidth; const h = window.innerHeight;
-        
         this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: "high-performance" });
         this.renderer.setSize(w, h);
         this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
-        this.renderer.autoClear = false;
         
         this.scene = new THREE.Scene();
-        this.camera = new THREE.PerspectiveCamera(45, w/h, 0.1, 15000);
-        this.clock = new THREE.Clock();
+        this.scene.background = new THREE.Color(0x0a0a0a);
+        
+        this.camera = new THREE.PerspectiveCamera(45, w/h, 10, 20000);
+        this.basePos.set(0, 0, 5000);
 
-        const amb = new THREE.AmbientLight(0xffffff, 0.3);
-        const dir = new THREE.DirectionalLight(0xffffff, 1.5);
-        dir.position.set(2000, 4000, 2000);
+        const amb = new THREE.AmbientLight(0xffffff, 0.4);
+        const dir = new THREE.DirectionalLight(0xffffff, 1.2);
+        dir.position.set(1000, 3000, 1000);
         this.scene.add(amb, dir);
-
-        this.gunScene = new THREE.Scene();
-        this.gunCamera = new THREE.PerspectiveCamera(45, w/h, 0.01, 100);
-        this.gunMesh = new THREE.Group();
-        const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.8), new THREE.MeshStandardMaterial({color: 0x222222, metalness: 0.8, roughness: 0.2}));
-        barrel.position.set(0.3, -0.2, -0.6);
-        this.gunMesh.add(barrel);
-        this.gunScene.add(this.gunMesh);
 
         this.rtTexture = new THREE.WebGLRenderTarget(w, h, { minFilter: THREE.LinearFilter, magFilter: THREE.NearestFilter });
         this.postCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
         this.postScene = new THREE.Scene();
         this.postMaterial = new THREE.ShaderMaterial({
-            uniforms: { tDiffuse: { value: this.rtTexture.texture }, time: { value: 0 }, uMode: { value: 0 } },
+            uniforms: { tDiffuse: { value: this.rtTexture.texture }, uMode: { value: 1 }, time: { value: 0 } },
             vertexShader: `varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position, 1.0); }`,
             fragmentShader: `
-                uniform sampler2D tDiffuse; uniform float time; uniform int uMode; varying vec2 vUv;
+                uniform sampler2D tDiffuse; uniform int uMode; uniform float time; varying vec2 vUv;
                 void main() {
                     vec4 c = texture2D(tDiffuse, vUv);
-                    if (uMode == 0) {
+                    if (uMode == 1) {
                         float luma = dot(c.rgb, vec3(0.299, 0.587, 0.114));
-                        vec3 final = mix(vec3(0.05, 0.06, 0.08), vec3(0.4, 0.45, 0.45), smoothstep(0.0, 0.6, luma));
-                        if (c.r > 0.8 && c.g > 0.8 && c.b > 0.8) { final = vec3(1.0); } 
-                        float noise = fract(sin(dot(vUv * time, vec2(12.9898,78.233))) * 43758.5453);
-                        final += noise * 0.05;
-                        final -= abs(sin(vUv.y * 800.0)) * 0.03; 
-                        gl_FragColor = vec4(final, 1.0);
-                    } else if (uMode == 1) {
-                        vec3 final = c.rgb;
-                        float ro = texture2D(tDiffuse, vUv + vec2(0.003, 0.0)).r;
-                        float bo = texture2D(tDiffuse, vUv - vec2(0.003, 0.0)).b;
-                        final.r = ro * 1.2; final.g *= 0.8; final.b = bo * 1.5;
-                        float scan = sin(vUv.y * 300.0 + time * 5.0) * 0.04;
-                        final += scan;
-                        gl_FragColor = vec4(final, 1.0);
-                    } else {
-                        gl_FragColor = c;
-                    }
-                }
-            `
+                        vec3 flir = mix(vec3(0.08, 0.09, 0.1), vec3(0.7, 0.75, 0.75), smoothstep(0.0, 0.7, luma));
+                        if (c.r > 0.8 && c.g < 0.2 && c.b < 0.2) { flir = vec3(1.2) + sin(time*15.0)*0.1; }
+                        flir += fract(sin(dot(vUv+time, vec2(12.9898,78.233))) * 43758.5453) * 0.05;
+                        flir -= abs(sin(vUv.y * 600.0)) * 0.04;
+                        gl_FragColor = vec4(flir, 1.0);
+                    } else { gl_FragColor = c; }
+                }`
         });
         this.postScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.postMaterial));
 
-        this.buildWorld();
+        this.buildEnv(envType);
         window.addEventListener('resize', this.onResize);
         this.renderer.setAnimationLoop(this.animate);
-        this.switchMode(initialView);
     }
 
-    private buildWorld() {
-        const tGeo = new THREE.PlaneGeometry(16000, 16000, 200, 200);
-        tGeo.rotateX(-Math.PI / 2);
-        const pos = tGeo.attributes.position;
-        const colors = []; const c = new THREE.Color();
-        for (let i = 0; i < pos.count; i++) {
-            const x = pos.getX(i); const z = pos.getZ(i);
-            const y = fBm(x, z);
-            pos.setY(i, y);
-            if (y > 150) c.setHex(0x111111);
-            else if (y > 50) c.setHex(0x222222);
-            else c.setHex(0x0a0a0a);
-            colors.push(c.r, c.g, c.b);
+    private buildEnv(env: string) {
+        if (env === 'DESERT') {
+            const tGeo = new THREE.PlaneGeometry(16000, 16000, 128, 128); tGeo.rotateX(-Math.PI / 2);
+            const pos = tGeo.attributes.position; const colors = []; const c = new THREE.Color();
+            for (let i = 0; i < pos.count; i++) {
+                const x = pos.getX(i); const z = pos.getZ(i); const y = fBm(x, z);
+                pos.setY(i, y);
+                const rx = Math.sin(z * 0.0005) * 2000;
+                if(Math.abs(x - rx) < 200) { c.setHex(0x3d2b1f); pos.setY(i, y * 0.3); } 
+                else { if(y > 100) c.setHex(0x52463b); else c.setHex(0x735c43); }
+                colors.push(c.r, c.g, c.b);
+            }
+            tGeo.computeVertexNormals(); tGeo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+            this.scene.add(new THREE.Mesh(tGeo, new THREE.MeshLambertMaterial({ vertexColors: true, roughness: 1.0 })));
+
+            const geo = new THREE.BoxGeometry(20, 20, 40); geo.translate(0, 10, 0);
+            for(let i=0; i<40; i++) {
+                const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({color: 0xff0000}));
+                this.scene.add(m);
+                this.targets.push({ mesh: m, type: 'TRUCK', hp: 100, active: true, vz: 100 + Math.random()*50 });
+            }
+        } 
+        else if (env === 'AIRBASE') {
+            const f = new THREE.Mesh(new THREE.PlaneGeometry(20000, 20000), new THREE.MeshLambertMaterial({color: 0x111111}));
+            f.rotateX(-Math.PI/2); this.scene.add(f);
+            this.scene.add(new THREE.GridHelper(20000, 150, 0x333333, 0x1a1a1a));
+
+            const jet = new THREE.Group();
+            const body = new THREE.Mesh(new THREE.ConeGeometry(5, 30, 4), new THREE.MeshBasicMaterial({color: 0xff0000})); body.rotateX(Math.PI/2);
+            const wing = new THREE.Mesh(new THREE.PlaneGeometry(40, 10), new THREE.MeshBasicMaterial({color: 0xff0000, side: 2})); wing.rotateX(-Math.PI/2);
+            jet.add(body, wing);
+
+            for(let i=0; i<30; i++) {
+                const g = jet.clone();
+                g.position.set((Math.random()-0.5)*12000, 5, (Math.random()-0.5)*12000);
+                g.rotation.y = Math.random() * Math.PI;
+                this.scene.add(g);
+                this.targets.push({ mesh: g, type: 'JET', hp: 150, active: true });
+            }
+        } 
+        else if (env === 'NAVAL') {
+            const wGeo = new THREE.PlaneGeometry(20000, 20000, 128, 128); wGeo.rotateX(-Math.PI/2);
+            this.waterMesh = new THREE.Mesh(wGeo, new THREE.MeshLambertMaterial({color: 0x051525}));
+            this.scene.add(this.waterMesh);
+
+            const ship = new THREE.Group();
+            const hull = new THREE.Mesh(new THREE.BoxGeometry(20, 30, 100).translate(0, 15, 0), new THREE.MeshBasicMaterial({color: 0xff0000}));
+            const t = new THREE.Mesh(new THREE.BoxGeometry(16, 20, 30).translate(0, 40, 0), new THREE.MeshBasicMaterial({color: 0xff0000}));
+            ship.add(hull, t);
+
+            for(let i=0; i<20; i++) {
+                const g = ship.clone();
+                const ang = Math.random() * Math.PI * 2;
+                g.position.set((Math.random()-0.5)*12000, 0, (Math.random()-0.5)*12000);
+                g.rotation.y = Math.atan2(Math.sin(ang), Math.cos(ang));
+                this.scene.add(g);
+                this.targets.push({ mesh: g, type: 'SHIP', hp: 300, active: true, vx: Math.sin(ang)*40, vz: Math.cos(ang)*40 });
+            }
         }
-        tGeo.computeVertexNormals();
-        tGeo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-        const terrain = new THREE.Mesh(tGeo, new THREE.MeshLambertMaterial({ vertexColors: true, roughness: 1.0 }));
-        this.scene.add(terrain);
-
-        const cloudGeo = new THREE.BufferGeometry();
-        const cPos = [];
-        for(let i=0; i<1000; i++) {
-            cPos.push((Math.random()-0.5)*10000, 2000 + Math.random()*500, (Math.random()-0.5)*10000);
-        }
-        cloudGeo.setAttribute('position', new THREE.Float32BufferAttribute(cPos, 3));
-        const cloudMat = new THREE.PointsMaterial({color: 0xffffff, size: 100, transparent: true, opacity: 0.1, depthWrite: false});
-        this.clouds = new THREE.Points(cloudGeo, cloudMat);
-        this.scene.add(this.clouds);
-
-        const tankGeo = new THREE.BoxGeometry(20, 15, 30); tankGeo.translate(0, 7.5, 0);
-        const tankMat = new THREE.MeshBasicMaterial({ color: 0xffffff }); 
-
-        const alienGeo = new THREE.TetrahedronGeometry(40, 1);
-        const alienMat = new THREE.MeshBasicMaterial({ color: 0x00ffff, wireframe: true });
-        
-        const soldierGeo = new THREE.CylinderGeometry(2, 2, 8); soldierGeo.translate(0, 4, 0);
-        const soldierMat = new THREE.MeshLambertMaterial({ color: 0xaa0000 });
-
-        let id = 0;
-        for (let i = 0; i < 200; i++) {
-            const x = (Math.random() - 0.5) * 12000; const z = (Math.random() - 0.5) * 12000;
-            const y = fBm(x, z);
-            
-            const tm = new THREE.Mesh(tankGeo, tankMat); tm.position.set(x, y, z);
-            this.scene.add(tm);
-            this.entities.push({ id: id++, type: 'TANK', mesh: tm, hp: 100, maxHp: 100, active: true });
-
-            const am = new THREE.Mesh(alienGeo, alienMat); am.position.set(x, 1500 + Math.random()*1000, z);
-            this.scene.add(am);
-            this.entities.push({ id: id++, type: 'ALIEN', mesh: am, hp: 300, maxHp: 300, active: true, velocity: new THREE.Vector3(Math.random()-0.5, 0, Math.random()-0.5).normalize().multiplyScalar(150) });
-
-            const sm = new THREE.Mesh(soldierGeo, soldierMat); sm.position.set(x + 50, fBm(x+50, z+50), z + 50);
-            this.scene.add(sm);
-            this.entities.push({ id: id++, type: 'SOLDIER', mesh: sm, hp: 40, maxHp: 40, active: true });
-        }
-        this.state.fpsPos.set(0, fBm(0, 0) + 1.8, 0);
     }
 
-    public fire() {
-        if (this.state.view === 'GROUND_FPS') {
-            if (this.state.ammo <= 0) return;
-            this.state.ammo--; this.state.recoil = 0.2;
-            this.syncHUD();
-            
-            const rc = new THREE.Raycaster();
-            rc.setFromCamera(new THREE.Vector2(0,0), this.camera);
-            for (let e of this.entities) {
-                if (e.active && e.type === 'SOLDIER') {
-                    if (rc.ray.distanceSqToPoint(e.mesh.position) < 20) {
-                        e.hp -= 40; this.state.hitMarker = 1.0;
-                        if (e.hp <= 0) { this.killEntity(e); }
+    public setViewMode(m: number) { this.viewMode = m; }
+    
+    public fire(powerLvl: number) {
+        this.shakeTime = 0.3;
+        const rc = new THREE.Raycaster();
+        rc.setFromCamera(new THREE.Vector2(0,0), this.camera);
+        const objs = this.targets.map(t => t.mesh).flatMap(g => g.type === 'Group' ? g.children : g);
+        const hits = rc.intersectObjects(objs, false);
+        if (hits.length > 0) {
+            let hitObj = hits[0].object;
+            const target = this.targets.find(t => t.mesh === hitObj || t.mesh === hitObj.parent);
+            if (target && target.active) {
+                target.hp -= 30 * powerLvl;
+                if (target.hp <= 0) {
+                    target.active = false; target.mesh.visible = false;
+                    this.spawnExp(target.mesh.position);
+                    if(this.onKill) {
+                        if(target.type==='TRUCK') this.onKill(100, 2, 10);
+                        if(target.type==='JET') this.onKill(200, 5, 25);
+                        if(target.type==='SHIP') this.onKill(500, 15, 50);
                     }
                 }
             }
-        } 
-        else if (this.state.view === 'DRONE_EARTH') {
-            if (this.trackingMissile) return;
-            const bGeo = new THREE.CylinderGeometry(2, 2, 20); bGeo.rotateX(Math.PI/2);
-            const b = new THREE.Mesh(bGeo, new THREE.MeshBasicMaterial({color: 0xffaaaa}));
-            b.position.copy(this.camera.position); b.position.y -= 20;
-            const rc = new THREE.Raycaster();
-            rc.setFromCamera(new THREE.Vector2(0,0), this.camera);
-            const l = new THREE.PointLight(0xff5500, 2, 500); b.add(l);
-            this.trackingMissile = { mesh: b, light: l };
-            this.bullets.push({ mesh: b, vel: rc.ray.direction.multiplyScalar(3000), life: 3.0, type: 'MISSILE' });
-            this.scene.add(b);
-        }
-        else if (this.state.view === 'DRONE_SPACE') {
-            const bGeo = new THREE.BoxGeometry(2, 2, 50);
-            const b = new THREE.Mesh(bGeo, new THREE.MeshBasicMaterial({color: 0x00ff00}));
-            b.position.copy(this.camera.position); b.position.y -= 20;
-            const rc = new THREE.Raycaster();
-            rc.setFromCamera(new THREE.Vector2(0,0), this.camera);
-            this.bullets.push({ mesh: b, vel: rc.ray.direction.multiplyScalar(5000), life: 2.0, type: 'LASER' });
-            this.scene.add(b);
         }
     }
 
-    private killEntity(e: Entity) {
-        e.active = false; e.mesh.visible = false;
-        if(e.type === 'TANK') this.state.score += 500;
-        if(e.type === 'ALIEN') this.state.score += 1000;
-        if(e.type === 'SOLDIER') this.state.score += 50;
-        this.syncHUD();
-    }
-
-    private syncHUD() {
-        this.onSyncHUD({ 
-            health: this.state.health, ammo: this.state.ammo, 
-            score: this.state.score, flashAlpha: this.state.flashAlpha,
-            hitMarker: this.state.hitMarker, view: this.state.view
-        });
-    }
-
-    public switchMode(forceMode?: ViewMode) {
-        if(forceMode) this.state.view = forceMode;
-        else if(this.state.view === 'DRONE_EARTH') this.state.view = 'DRONE_SPACE';
-        else if(this.state.view === 'DRONE_SPACE') this.state.view = 'GROUND_FPS';
-        else this.state.view = 'DRONE_EARTH';
-        
-        if (this.state.view === 'GROUND_FPS') {
-            this.state.fpsPos.x = this.state.dronePos.x;
-            this.state.fpsPos.z = this.state.dronePos.z;
-            this.state.fpsPos.y = fBm(this.state.fpsPos.x, this.state.fpsPos.z) + 1.8;
-            this.scene.fog = new THREE.FogExp2(0x0a0a0a, 0.001);
-        } else if (this.state.view === 'DRONE_EARTH') {
-            this.state.dronePos.x = this.state.fpsPos.x;
-            this.state.dronePos.z = this.state.fpsPos.z;
-            this.scene.fog = null;
-        } else {
-            this.scene.fog = null;
+    private spawnExp(pos: THREE.Vector3) {
+        const geo = new THREE.BufferGeometry();
+        const pts = new Float32Array(300); const vels = [];
+        for(let i=0; i<300; i+=3) {
+            pts[i]=pos.x; pts[i+1]=pos.y; pts[i+2]=pos.z;
+            vels.push(new THREE.Vector3((Math.random()-0.5)*2, Math.random(), (Math.random()-0.5)*2).normalize().multiplyScalar(400 + Math.random()*200));
         }
-        this.trackingMissile = null;
-        this.syncHUD();
+        geo.setAttribute('position', new THREE.BufferAttribute(pts, 3));
+        const exp = new THREE.Points(geo, new THREE.PointsMaterial({color: 0xffaa00, size: 40, transparent: true}));
+        this.scene.add(exp);
+        this.explosions.push({ mesh: exp, vels, life: 1.0 });
     }
 
     private animate = () => {
-        const dt = Math.min(this.clock.getDelta(), 0.05);
-        const time = this.clock.getElapsedTime();
+        const dt = Math.min(this.clock.getDelta(), 0.1);
+        const t = this.clock.getElapsedTime();
 
-        if (this.state.flashAlpha > 0) { this.state.flashAlpha = Math.max(0, this.state.flashAlpha - dt * 1.5); this.syncHUD(); }
-        if (this.state.hitMarker > 0) { this.state.hitMarker = Math.max(0, this.state.hitMarker - dt * 3); this.syncHUD(); }
-
-        if (this.clouds) {
-             const points = this.clouds.geometry.attributes.position.array as Float32Array;
-             for(let i=0; i<points.length; i+=3) {
-                 points[i] += 100 * dt;
-                 if(points[i] > 8000) points[i] = -8000;
-             }
-             this.clouds.geometry.attributes.position.needsUpdate = true;
-             this.clouds.visible = this.state.view === 'DRONE_EARTH';
-        }
-
-        let alienMarkup = '';
-        for(let e of this.entities) {
-            if(!e.active) continue;
-            e.mesh.visible = true; 
-            if (this.state.view === 'DRONE_EARTH' && e.type !== 'TANK') e.mesh.visible = false;
-            if (this.state.view === 'DRONE_SPACE' && e.type !== 'ALIEN') e.mesh.visible = false;
-            if (this.state.view === 'GROUND_FPS' && e.type !== 'SOLDIER') e.mesh.visible = false;
-
-            if (e.type === 'ALIEN' && e.velocity) {
-                e.mesh.position.addScaledVector(e.velocity, dt);
-                e.mesh.rotation.x += dt; e.mesh.rotation.y += dt;
-                if(Math.abs(e.mesh.position.x) > 6000) e.velocity.x *= -1;
-                if(Math.abs(e.mesh.position.z) > 6000) e.velocity.z *= -1;
-
-                if(this.state.view === 'DRONE_SPACE') {
-                    const p = e.mesh.position.clone().project(this.camera);
-                    if(p.z < 1) {
-                        const x = (p.x * 0.5 + 0.5) * window.innerWidth;
-                        const y = (-(p.y * 0.5) + 0.5) * window.innerHeight;
-                        alienMarkup += `<div style="position:absolute; left:${x-20}px; top:${y-20}px; width:40px; height:40px; border: 1px solid #00ffff; pointer-events:none;">
-                            <div style="position:absolute; top:-6px; width:100%; height:3px; background:#a00;">
-                                 <div style="height:100%; background:#0ff; width:${(e.hp/e.maxHp)*100}%"></div>
-                            </div>
-                        </div>`;
-                    }
-                }
+        for (let e of this.targets) {
+            if (!e.active) continue;
+            if (e.type === 'TRUCK' && e.vz) {
+                e.mesh.position.z += e.vz * dt;
+                if(e.mesh.position.z > 8000) e.mesh.position.z = -8000;
+                const rx = Math.sin(e.mesh.position.z * 0.0005) * 2000;
+                e.mesh.position.x = rx; e.mesh.position.y = fBm(rx, e.mesh.position.z) * 0.3;
+                e.mesh.lookAt(Math.sin((e.mesh.position.z+10)*0.0005)*2000, e.mesh.position.y, e.mesh.position.z+10);
             }
-        }
-        if (this.alienOverlayRef) this.alienOverlayRef.innerHTML = alienMarkup;
-
-        if (this.state.view === 'DRONE_EARTH' || this.state.view === 'DRONE_SPACE') {
-            const speed = 1500 * dt;
-            this.state.dronePos.x += this.state.inputL.x * speed;
-            this.state.dronePos.z += this.state.inputL.y * speed;
-            
-            if (this.trackingMissile && this.state.view === 'DRONE_EARTH') {
-                const mp = this.trackingMissile.mesh.position;
-                this.camera.position.lerp(new THREE.Vector3(mp.x, mp.y + 250, mp.z + 250), 10 * dt);
-                this.camera.lookAt(mp);
-            } else {
-                this.camera.position.copy(this.state.dronePos);
-                this.camera.position.x += this.state.inputR.x * 800;
-                this.camera.position.z += this.state.inputR.y * 800;
-                this.camera.lookAt(this.state.dronePos.x, 0, this.state.dronePos.z);
-            }
-            this.postMaterial.uniforms.uMode.value = this.state.view === 'DRONE_EARTH' ? 0 : 1;
-        } else {
-            const moveSpeed = 80 * dt; const rotSpeed = 2.5 * dt;
-            this.state.fpsYaw -= this.state.inputR.x * rotSpeed;
-            this.state.fpsPitch += this.state.inputR.y * rotSpeed;
-            this.state.fpsPitch = Math.max(-Math.PI/2, Math.min(Math.PI/2, this.state.fpsPitch));
-            
-            const fwd = new THREE.Vector3(0,0,-1).applyAxisAngle(new THREE.Vector3(0,1,0), this.state.fpsYaw);
-            const right = new THREE.Vector3(1,0,0).applyAxisAngle(new THREE.Vector3(0,1,0), this.state.fpsYaw);
-            
-            this.state.fpsPos.add(fwd.multiplyScalar(-this.state.inputL.y * moveSpeed));
-            this.state.fpsPos.add(right.multiplyScalar(this.state.inputL.x * moveSpeed));
-            
-            const gy = fBm(this.state.fpsPos.x, this.state.fpsPos.z);
-            this.state.fpsPos.y = THREE.MathUtils.lerp(this.state.fpsPos.y, gy + 1.8, dt * 15);
-            
-            this.camera.position.copy(this.state.fpsPos);
-            this.camera.rotation.set(this.state.fpsPitch, this.state.fpsYaw, 0, 'YXZ');
-            
-            const swayX = Math.sin(time * 6) * 0.02 * (Math.abs(this.state.inputL.x) + Math.abs(this.state.inputL.y));
-            const swayY = Math.cos(time * 12) * 0.02 * (Math.abs(this.state.inputL.x) + Math.abs(this.state.inputL.y));
-            this.gunMesh.position.set(0.3 + swayX, -0.2 + swayY, -0.6 + this.state.recoil);
-            if (this.state.recoil > 0) this.state.recoil = Math.max(0, this.state.recoil - dt * 3.0);
-            this.postMaterial.uniforms.uMode.value = 2;
-        }
-
-        for (let i = this.bullets.length - 1; i >= 0; i--) {
-            const b = this.bullets[i];
-            b.life -= dt;
-            b.mesh.position.addScaledVector(b.vel, dt);
-            
-            let hit = false;
-            let groundY = fBm(b.mesh.position.x, b.mesh.position.z);
-            if (b.life <= 0 || b.mesh.position.y < groundY) hit = true;
-            
-            if (!hit) {
-                for (let e of this.entities) {
-                    if (e.active && e.mesh.visible) {
-                        const dist = e.type === 'ALIEN' ? 50 : 20;
-                        if (e.mesh.position.distanceTo(b.mesh.position) < dist) {
-                            e.hp -= (b.type === 'MISSILE' ? 100 : 50); hit = true;
-                            if (e.hp <= 0) this.killEntity(e);
-                            break;
-                        }
-                    }
-                }
-            }
-            if (hit) {
-                if (b.type === 'MISSILE' && this.trackingMissile && this.trackingMissile.mesh === b.mesh) {
-                    this.state.flashAlpha = 1.0;
-                    this.trackingMissile = null;
-                    this.syncHUD();
-                    for(let e of this.entities) {
-                        if(e.active && e.type==='TANK' && e.mesh.position.distanceTo(b.mesh.position) < 300) this.killEntity(e);
-                    }
-                }
-                this.scene.remove(b.mesh);
-                this.bullets.splice(i, 1);
+            if (e.type === 'SHIP' && e.vx && e.vz) {
+                e.mesh.position.addScaledVector(new THREE.Vector3(e.vx, 0, e.vz), dt);
+                if(Math.abs(e.mesh.position.x)>8000) e.vx *= -1;
+                if(Math.abs(e.mesh.position.z)>8000) e.vz *= -1;
+                e.mesh.rotation.y = Math.atan2(e.vx, e.vz);
             }
         }
 
-        if (this.state.view === 'DRONE_EARTH' || this.state.view === 'DRONE_SPACE') {
-            this.renderer.setRenderTarget(this.rtTexture);
-            this.renderer.clear();
-            this.renderer.render(this.scene, this.camera);
-            this.renderer.setRenderTarget(null);
-            this.postMaterial.uniforms.time.value = time;
-            this.renderer.render(this.postScene, this.postCamera);
-        } else {
-            this.renderer.clear();
-            this.renderer.render(this.scene, this.camera);
-            this.renderer.clearDepth();
-            this.renderer.render(this.gunScene, this.gunCamera);
+        for (let i = this.explosions.length - 1; i >= 0; i--) {
+            let ex = this.explosions[i]; ex.life -= dt;
+            const p = ex.mesh.geometry.attributes.position.array as Float32Array;
+            for(let j=0; j<ex.vels.length; j++) {
+                p[j*3] += ex.vels[j].x * dt; p[j*3+1] += ex.vels[j].y * dt; p[j*3+2] += ex.vels[j].z * dt;
+            }
+            ex.mesh.geometry.attributes.position.needsUpdate = true;
+            (ex.mesh.material as THREE.PointsMaterial).opacity = ex.life;
+            if(ex.life <= 0) { this.scene.remove(ex.mesh); this.explosions.splice(i, 1); }
         }
+
+        if (this.waterMesh) {
+            const pos = this.waterMesh.geometry.attributes.position as THREE.BufferAttribute;
+            const arr = pos.array as Float32Array;
+            for(let i=0; i<pos.count; i++) {
+                arr[i*3+1] = Math.sin(arr[i*3]*0.01 + t*2)*15 + Math.cos(arr[i*3+2]*0.01 + t*2)*15;
+            }
+            pos.needsUpdate = true;
+        }
+
+        this.basePos.x += this.inputL.x * 3000 * dt;
+        this.basePos.z += this.inputL.y * 3000 * dt; // pulling bottom (-y) translates to forward z (+z visually if neg lookat)
+
+        this.camera.position.set(this.basePos.x, 2500, this.basePos.z);
+        if (this.shakeTime > 0) {
+            this.shakeTime -= dt;
+            this.camera.position.x += (Math.random()-0.5)*100;
+            this.camera.position.z += (Math.random()-0.5)*100;
+        }
+        this.camera.lookAt(this.basePos.x, 0, this.basePos.z - 1000);
+
+        this.renderer.setRenderTarget(this.rtTexture);
+        this.renderer.clear(); this.renderer.render(this.scene, this.camera);
+        this.renderer.setRenderTarget(null);
+        this.postMaterial.uniforms.time.value = t;
+        this.postMaterial.uniforms.uMode.value = this.viewMode;
+        this.renderer.render(this.postScene, this.postCamera);
     };
-    
+
     private onResize = () => {
         const w = window.innerWidth; const h = window.innerHeight;
-        this.renderer.setSize(w, h);
-        if(this.rtTexture) this.rtTexture.setSize(w, h);
+        this.renderer.setSize(w, h); this.rtTexture.setSize(w, h);
         this.camera.aspect = w/h; this.camera.updateProjectionMatrix();
-        this.gunCamera.aspect = w/h; this.gunCamera.updateProjectionMatrix();
     };
-    
+
     public dispose() {
         window.removeEventListener('resize', this.onResize);
-        this.renderer.dispose();
-        this.rtTexture.dispose();
+        this.renderer.dispose(); this.rtTexture.dispose();
     }
 }
 
 // --------------------------------------------------------
-// REACT COMPONENTS
+// REACT UI COMPONENTS
 // --------------------------------------------------------
-function Joystick({ onMove, side }: { onMove: (x: number, y: number) => void, side: 'left' | 'right' }) {
-    const baseRef = useRef<HTMLDivElement>(null);
-    const stickRef = useRef<HTMLDivElement>(null);
-
-    const handlePointerMove = (e: React.PointerEvent) => {
-        if (e.buttons === 0) return;
-        if (!baseRef.current || !stickRef.current) return;
+const Joystick = ({ onMove }: { onMove: (x: number, y: number) => void }) => {
+    const baseRef = useRef<HTMLDivElement>(null); const stickRef = useRef<HTMLDivElement>(null);
+    const hMove = (e: React.PointerEvent) => {
+        if (e.buttons === 0 || !baseRef.current || !stickRef.current) return;
         const rect = baseRef.current.getBoundingClientRect();
-        const cx = rect.left + rect.width / 2; const cy = rect.top + rect.height / 2;
-        let dx = e.clientX - cx; let dy = e.clientY - cy;
-        const rad = rect.width / 2;
-        const dist = Math.min(Math.hypot(dx, dy), rad);
-        const angle = Math.atan2(dy, dx);
-        dx = Math.cos(angle) * dist; dy = Math.sin(angle) * dist;
-        
+        let dx = e.clientX - (rect.left + rect.width/2); let dy = e.clientY - (rect.top + rect.height/2);
+        const r = rect.width/2; const d = Math.min(Math.hypot(dx, dy), r); const a = Math.atan2(dy, dx);
+        dx = Math.cos(a)*d; dy = Math.sin(a)*d;
         stickRef.current.style.transform = `translate(${dx}px, ${dy}px)`;
-        onMove(dx / rad, dy / rad);
+        onMove(dx/r, dy/r); // up is negative y
     };
-
-    const handlePointerUp = () => {
-        if (stickRef.current) stickRef.current.style.transform = `translate(0px, 0px)`;
-        onMove(0, 0);
-    };
-
+    const hUp = () => { if(stickRef.current) stickRef.current.style.transform = `translate(0, 0)`; onMove(0,0); };
     return (
-        <div ref={baseRef} 
-             className={`absolute bottom-8 w-32 h-32 rounded-full border-2 border-white/20 bg-black/30 touch-none backdrop-blur-sm flex items-center justify-center pointer-events-auto z-40 ${side === 'left' ? 'left-8' : 'right-40'}`}
-             onPointerDown={handlePointerMove} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerLeave={handlePointerUp}>
-             <div ref={stickRef} className="w-12 h-12 rounded-full bg-white/50 shadow-[0_0_15px_rgba(255,255,255,0.8)] pointer-events-none transition-transform duration-75" />
-        </div>
-    );
-}
-
-const IntroSequence = ({ onComplete }: { onComplete: () => void }) => {
-    const [text, setText] = useState("");
-    useEffect(() => {
-        let step = 0;
-        const sequence = [
-            "جاري فحص الاتصال التكتيكي المحلي...",
-            "تحليل البيانات الطبوغرافية...",
-            "تشفير الإحداثيات...",
-            "تأكيد بروتوكول التشغيل الأوفلاين... نَشِط"
-        ];
-        const int = setInterval(() => {
-            if (step >= sequence.length) {
-                clearInterval(int);
-                setTimeout(onComplete, 500);
-            } else {
-                setText(sequence[step]);
-                step++;
-            }
-        }, 800);
-        return () => clearInterval(int);
-    }, []);
-
-    return (
-        <div className="absolute inset-0 bg-black flex items-center justify-center font-mono text-green-500 text-xl tracking-widest pointer-events-none z-50">
-            {text}
-            <div className="w-2 h-6 bg-green-500 animate-pulse inline-block ml-2 align-middle" />
+        <div ref={baseRef} className="w-32 h-32 rounded-full border-2 border-white/20 bg-black/40 backdrop-blur-sm touch-none flex items-center justify-center pointer-events-auto"
+            onPointerDown={hMove} onPointerMove={hMove} onPointerUp={hUp} onPointerLeave={hUp}>
+            <div ref={stickRef} className="w-12 h-12 rounded-full bg-white/60 shadow-[0_0_15px_#fff] pointer-events-none transition-transform duration-75" />
         </div>
     );
 };
 
 export default function App() {
-    const [appState, setAppState] = useState<'AUTH' | 'INTRO' | 'MENU' | 'STORE' | 'GAME'>('AUTH');
-    const [viewMode, setViewMode] = useState<ViewMode>('DRONE_EARTH');
-    const [save, setSave] = usePlayerSave();
+    const [mode, setMode] = useState<'HANGAR' | 'MAP' | 'GAME'>('HANGAR');
+    const [env, setEnv] = useState<'DESERT' | 'AIRBASE' | 'NAVAL'>('DESERT');
     
-    const [authCode, setAuthCode] = useState("");
-    const [authErr, setAuthErr] = useState(false);
+    const [res, setRes] = useGameState('RES', { gold: 5000, diamonds: 50, scrap: 100 });
+    const [upg, setUpg] = useGameState('UPG', { armor: 1, power: 1, velocity: 1, reload: 1 });
     
-    const [storeCode, setStoreCode] = useState("");
-    const [storeMsg, setStoreMsg] = useState("");
+    const [viewMode, setViewMode] = useState(1);
+    const [zoomIdx, setZoomIdx] = useState(0);
+    const zooms = [45, 30, 15]; const zoomStrs = ['x1.0', 'x2.5', 'x4.8'];
+    const [lastFire, setLastFire] = useState(0);
 
-    const [hud, setHud] = useState({ view: 'DRONE_EARTH', health: 100, ammo: 300, score: 0, flashAlpha: 0, hitMarker: 0 });
-    
     const canvasRef = useRef<HTMLCanvasElement>(null);
-    const overlayRef = useRef<HTMLDivElement>(null);
     const engineRef = useRef<TacticalEngine | null>(null);
 
-    const checkAuth = (e: React.FormEvent) => {
-        e.preventDefault();
-        if (authCode === CORE_KEY) {
-            setAppState('INTRO');
-        } else {
-            setAuthErr(true); setTimeout(() => setAuthErr(false), 1000);
+    const buy = (stat: keyof typeof upg) => {
+        const cost = upg[stat] * 1000;
+        if(res.gold >= cost && upg[stat] < 5) {
+            setRes({ ...res, gold: res.gold - cost });
+            setUpg({ ...upg, [stat]: upg[stat] + 1 });
         }
     };
 
-    const redeemCard = (e: React.FormEvent) => {
-        e.preventDefault();
-        if (storeCode === MASTER_CARD) {
-            setSave({ ...save, credits: 999999, skin: 'العقاب الذهبي' });
-            setStoreMsg("تم تفعيل كارت الشحن بنجاح! الذخيرة النووية جاهزة الآن");
-        } else {
-            setStoreMsg("كود التفعيل غير صالح والعملية قيد المراقبة");
+    const handleFire = () => {
+        const now = Date.now(); const cd = 2000 - (upg.reload * 300);
+        if (now - lastFire > cd && engineRef.current) {
+            setLastFire(now);
+            engineRef.current.fire(upg.power);
         }
-    };
-
-    const runMission = (mode: ViewMode) => {
-        setViewMode(mode);
-        setAppState('GAME');
     };
 
     useEffect(() => {
-        if (appState === 'GAME' && canvasRef.current && !engineRef.current) {
-            engineRef.current = new TacticalEngine(canvasRef.current, viewMode, overlayRef.current);
-            engineRef.current.onSyncHUD = (data) => setHud(prev => ({...prev, ...data}));
+        if (mode === 'GAME' && canvasRef.current && !engineRef.current) {
+            engineRef.current = new TacticalEngine(canvasRef.current, env);
+            engineRef.current.onKill = (g, d, s) => setRes(r => ({ gold: r.gold+g, diamonds: r.diamonds+d, scrap: r.scrap+s }));
+            engineRef.current.setViewMode(viewMode);
+            engineRef.current.camera.fov = zooms[zoomIdx];
+            engineRef.current.camera.updateProjectionMatrix();
         }
-        return () => {
-            if (appState !== 'GAME' && engineRef.current) {
-                setSave(s => ({...s, score: s.score + hud.score}));
-                engineRef.current.dispose();
-                engineRef.current = null;
-            }
-        };
-    }, [appState]);
+        return () => { if (mode !== 'GAME' && engineRef.current) { engineRef.current.dispose(); engineRef.current = null; } };
+    }, [mode, env]);
 
-    const handleInputL = useCallback((x: number, y: number) => { if (engineRef.current) engineRef.current.state.inputL = { x, y }; }, []);
-    const handleInputR = useCallback((x: number, y: number) => { if (engineRef.current) engineRef.current.state.inputR = { x, y }; }, []);
+    useEffect(() => { if(engineRef.current) engineRef.current.setViewMode(viewMode); }, [viewMode]);
+    useEffect(() => { if(engineRef.current) { engineRef.current.camera.fov = zooms[zoomIdx]; engineRef.current.camera.updateProjectionMatrix(); } }, [zoomIdx]);
 
     return (
-        <div className="w-screen h-screen bg-black overflow-hidden font-mono select-none" dir="rtl">
+        <div className="w-screen h-screen bg-black overflow-hidden font-mono select-none" dir="rtl" style={{touchAction: 'none'}}>
             <LandscapeGuard />
 
-            {appState === 'AUTH' && (
-                <div className="absolute inset-0 flex items-center justify-center bg-[#0a0a0a]">
-                    <div className="w-96 p-8 border border-white/20 bg-black/80 backdrop-blur-md shadow-[0_0_30px_rgba(255,255,255,0.1)]">
-                        <h1 className="text-2xl font-bold text-white mb-6 text-center tracking-widest">منصة التشفير السيادي</h1>
-                        <form onSubmit={checkAuth} className="flex flex-col gap-4">
-                            <input type="text" value={authCode} onChange={e => setAuthCode(e.target.value.toUpperCase())}
-                                placeholder="ACCESS CODE" dir="ltr"
-                                className={`w-full bg-transparent border-b-2 ${authErr ? 'border-red-500 text-red-500' : 'border-white text-white'} p-2 text-center text-xl outline-none tracking-widest uppercase transition-colors`} />
-                            <button type="submit" className="w-full bg-white text-black font-bold py-3 mt-4 hover:bg-gray-200 transition-colors">تحقق من الصلاحيات</button>
-                        </form>
+            {mode === 'HANGAR' && (
+                <div className="absolute inset-0 bg-zinc-900 border-[12px] border-black flex flex-col items-center pt-8 z-10">
+                    <h1 className="text-4xl text-white font-black mb-8 tracking-widest shadow-black drop-shadow-md">مستودع الترقيات العسكرية</h1>
+                    <div className="flex gap-6 mb-12">
+                        {[ {id:'armor', t:'درع المسيرة'}, {id:'power', t:'طاقة القذيفة'}, {id:'velocity', t:'سرعة الصاروخ'}, {id:'reload', t:'معدل التلقيم'} ].map(u => (
+                            <div key={u.id} className="bg-black/50 border border-white/20 p-4 w-56 flex flex-col items-center shadow-[0_0_15px_rgba(255,255,255,0.05)]">
+                                <h3 className="text-white font-bold mb-3 tracking-widest">{u.t}</h3>
+                                <div className="flex gap-1 mb-4 w-full justify-center">
+                                    {[1,2,3,4,5].map(i => <div key={i} className={`h-2 flex-1 ${i <= upg[u.id as keyof typeof upg] ? 'bg-green-500 shadow-[0_0_8px_#0f0]' : 'bg-gray-800'}`} />)}
+                                </div>
+                                <button onClick={() => buy(u.id as any)} disabled={upg[u.id as keyof typeof upg] >= 5} className="w-full bg-white text-black font-bold py-2 disabled:opacity-50 hover:bg-gray-300 transition-colors">
+                                    {upg[u.id as keyof typeof upg] >= 5 ? 'طاقة قصوى' : `ترقية (${upg[u.id as keyof typeof upg] * 1000} ذهب)`}
+                                </button>
+                            </div>
+                        ))}
                     </div>
+                    <div className="flex gap-8 text-xl font-bold bg-black/80 px-8 py-4 border border-white/10 shadow-[0_0_20px_rgba(0,0,0,0.8)]">
+                        <div className="text-yellow-400 drop-shadow-md">الاعتمادات الذهبية: {res.gold}</div>
+                        <div className="text-blue-400 drop-shadow-md">الماس التكتيكي: {res.diamonds}</div>
+                        <div className="text-gray-400 drop-shadow-md">القطع التقنية: {res.scrap}</div>
+                    </div>
+                    <button onClick={() => setMode('MAP')} className="mt-8 bg-red-700 text-white font-black text-2xl px-16 py-5 hover:bg-red-500 transition-colors border-2 border-red-400 shadow-[0_0_20px_rgba(255,0,0,0.5)]">
+                        خريطة العمليات التكتيكية
+                    </button>
                 </div>
             )}
 
-            {appState === 'INTRO' && <IntroSequence onComplete={() => setAppState('MENU')} />}
-
-            {appState === 'MENU' && (
-                <div className="absolute inset-0 flex flex-col items-center justify-center bg-zinc-900">
-                    <div className="absolute top-4 right-4 text-green-500 font-bold border border-green-500 p-2">
-                        الاعتمادات العسكرية: {save.credits} | النقاط: {save.score}
-                    </div>
-                    <h1 className="text-4xl text-white font-bold mb-10 tracking-widest text-center shadow-black drop-shadow-lg">غرفة التخطيط والاستراتيجية</h1>
-                    <div className="flex flex-col gap-4 w-80">
-                        <button onClick={() => runMission('DRONE_EARTH')} className="w-full bg-white text-black font-bold py-4 hover:bg-gray-300 transition-colors">بدء الهجوم الجوي التكتيكي</button>
-                        <button onClick={() => runMission('GROUND_FPS')} className="w-full border border-white/50 text-white font-bold py-4 hover:bg-white/10 transition-colors">النزول الميداني وتطهير الخنادق</button>
-                        <button onClick={() => setAppState('STORE')} className="w-full border border-yellow-500 text-yellow-500 font-bold py-4 hover:bg-yellow-500/20 transition-colors">مخزن العتاد والتسليح الرقمي</button>
-                    </div>
-                </div>
-            )}
-
-            {appState === 'STORE' && (
-                <div className="absolute inset-0 flex flex-col items-center justify-center bg-zinc-900 z-50">
-                     <h2 className="text-3xl text-white font-bold mb-8 tracking-widest text-center">شحن العتاد عبر الكروت المحلية</h2>
-                     <form onSubmit={redeemCard} className="flex flex-col gap-4 w-96">
-                          <input type="text" value={storeCode} onChange={e=>setStoreCode(e.target.value.toUpperCase())} placeholder="أدخل رمز الشحن" dir="ltr"
-                                 className="w-full bg-black border border-white/40 p-4 text-center text-xl text-yellow-400 font-bold outline-none uppercase" />
-                          <button type="submit" className="w-full bg-yellow-600 text-black font-bold py-4 hover:bg-yellow-500 transition-colors">تفعيل بروتوكول الإمداد</button>
-                          <button type="button" onClick={() => setAppState('MENU')} className="w-full bg-black border border-white/50 text-white font-bold py-4 hover:bg-white/10 mt-4">عودة لقاعدة التخطيط</button>
-                          {storeMsg && <div className="mt-4 text-center text-lg font-bold text-white bg-black/50 p-4 border border-white/30">{storeMsg}</div>}
-                     </form>
-                </div>
-            )}
-
-            {appState === 'GAME' && (
-                <>
-                    <canvas ref={canvasRef} className="absolute inset-0 w-full h-full block" />
-                    <div ref={overlayRef} className="absolute inset-0 pointer-events-none z-10" />
+            {mode === 'MAP' && (
+                <div className="absolute inset-0 bg-black flex items-center justify-center">
+                    <svg className="absolute inset-0 w-full h-full pointer-events-none opacity-40">
+                        <path d="M 0,200 Q 400,0 800,400 T 2000,200" stroke="#f00" strokeWidth="6" fill="none" strokeDasharray="10 20" />
+                        <path d="M 0,600 Q 600,800 1000,300 T 2000,700" stroke="#00f" strokeWidth="6" fill="none" strokeDasharray="10 20" />
+                    </svg>
+                    <div className="absolute top-8 text-3xl font-black text-white bg-black/80 px-8 py-4 border border-white/20 tracking-widest shadow-[0_0_20px_rgba(255,255,255,0.2)]">خريطة العمليات الخاصة</div>
                     
-                    <div className="absolute inset-0 pointer-events-none z-20 flex flex-col justify-between p-4 font-mono select-none">
-                        <div className="absolute inset-0 bg-white pointer-events-none transition-opacity duration-75" style={{opacity: hud.flashAlpha, zIndex: 9999}} />
-                        
-                        {hud.hitMarker > 0 && (
-                             <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 pointer-events-none opacity-80" style={{transform: `translate(-50%, -50%) scale(${1 + hud.hitMarker})`}}>
-                                  <div className="absolute top-0 left-0 w-full h-full"> 
-                                       <div className="absolute top-1/2 left-0 w-full h-[2px] bg-red-500 rotate-45" />
-                                       <div className="absolute top-1/2 left-0 w-full h-[2px] bg-red-500 -rotate-45" />
-                                  </div>
-                             </div>
-                        )}
+                    {[ {e:'DESERT', t:'قافلة الصحراء', x:'30%', y:'40%', c:'border-orange-500', s:'shadow-[0_0_30px_#f97316]'},
+                       {e:'AIRBASE', t:'المدرج الجوي', x:'55%', y:'65%', c:'border-blue-500', s:'shadow-[0_0_30px_#3b82f6]'},
+                       {e:'NAVAL', t:'القطاع البحري', x:'80%', y:'35%', c:'border-teal-500', s:'shadow-[0_0_30px_#14b8a6]'} ].map(n => (
+                           <div key={n.e} className="absolute flex flex-col items-center" style={{ left: n.x, top: n.y, transform: 'translate(-50%, -50%)' }}>
+                               <button onClick={() => { setEnv(n.e as any); setMode('GAME'); }} className={`w-16 h-16 rounded-full bg-black border-4 ${n.c} ${n.s} flex items-center justify-center hover:scale-110 transition-transform`}>
+                                   <div className="w-6 h-6 bg-white rounded-full animate-pulse" />
+                               </button>
+                               <span className="mt-4 bg-black/80 text-white px-4 py-1 border border-white/20 font-bold tracking-widest whitespace-nowrap">{n.t}</span>
+                           </div>
+                    ))}
+                    <button onClick={() => setMode('HANGAR')} className="absolute bottom-8 right-8 bg-gray-800 border border-white/50 text-white font-bold px-8 py-3 hover:bg-gray-700 transition-colors">تراجع للمستودع</button>
+                    
+                    <div className="absolute bottom-6 left-8 flex flex-col gap-2 font-bold bg-black/80 p-4 border border-white/10">
+                        <div className="text-yellow-400">ذهب: {res.gold}</div>
+                        <div className="text-blue-400">ماس: {res.diamonds}</div>
+                    </div>
+                </div>
+            )}
 
-                        <div className="flex justify-between items-start pointer-events-auto">
-                            <div className="flex flex-col gap-2">
-                                {hud.view === 'GROUND_FPS' ? (
-                                    <>
-                                        <div className="bg-black/80 border border-white/20 p-2 px-4 w-72">
-                                            <div className="text-xs text-white/50 mb-1 font-bold">مؤشر سلامة الهيكل العسكري: {hud.health}%</div>
-                                            <div className="w-full h-3 bg-red-900/50 relative overflow-hidden">
-                                                <div className="absolute top-0 left-0 h-full bg-green-500 transition-all" style={{width: `${Math.max(0, hud.health)}%`}} />
-                                            </div>
-                                        </div>
-                                        <div className="text-xl font-bold text-white bg-black/80 px-4 py-2 border border-white/20 w-72" dir="ltr">
-                                            AMMO: {hud.ammo}
-                                        </div>
-                                    </>
-                                ) : (
-                                    <div className="bg-black/80 border border-white/20 p-2 px-4 w-72">
-                                        <div className="text-sm font-bold tracking-widest text-center text-green-400">
-                                            {hud.view === 'DRONE_EARTH' ? 'FLIR OPTICS // TACTICAL' : 'COSMIC TARGETING // SPACE'}
-                                        </div>
-                                    </div>
-                                )}
-                                <div className="bg-black/80 text-yellow-500 font-bold px-4 py-2 mt-2 border border-white/20 tracking-widest text-center w-72">
-                                    الاعتمادات الميدانية: {hud.score}
+            {mode === 'GAME' && (
+                <>
+                    <canvas ref={canvasRef} className="absolute inset-0 w-full h-full block touch-none" />
+                    <div className="absolute inset-0 pointer-events-none flex flex-col justify-between p-6">
+                        
+                        {/* HUD TOP */}
+                        <div className="flex justify-between items-start">
+                            <div className="flex gap-4 font-bold">
+                                <div className="bg-black/60 border border-yellow-500/50 p-2 px-4 shadow-[0_0_10px_rgba(255,215,0,0.2)]">
+                                    الميزانية: <span className="text-yellow-400">{res.gold}</span>
+                                </div>
+                                <div className="bg-black/60 border border-white/30 p-2 px-4 shadow-[0_0_10px_rgba(255,255,255,0.1)] text-white/80">
+                                    القطاع: {env}
                                 </div>
                             </div>
-
-                            <div className="flex gap-4">
-                                <button onClick={() => engineRef.current?.switchMode()} className="bg-black/80 text-white font-bold py-2 px-6 border border-white/30 hover:bg-white hover:text-black pointer-events-auto transition-colors">
-                                    التبديل التكتيكي للرؤية
+                            <div className="flex gap-4 pointer-events-auto">
+                                <button onClick={() => setViewMode(1 - viewMode)} className={`border-2 p-3 px-6 font-bold text-sm tracking-widest transition-colors ${viewMode === 1 ? 'border-green-500 bg-green-900/40 text-green-400' : 'border-blue-500 bg-blue-900/40 text-blue-400'}`}>
+                                    {viewMode === 1 ? 'FLIR: ACTIVE' : 'OPTICS: COLOR'}
                                 </button>
-                                <button onClick={() => setAppState('MENU')} className="bg-red-800/90 text-white font-bold py-2 px-6 border border-red-500 hover:bg-red-600 pointer-events-auto shadow-[0_0_10px_rgba(255,0,0,0.5)] transition-colors">
-                                    إخلاء الموقع
-                                </button>
+                                <button onClick={() => setMode('MAP')} className="bg-red-800/80 border border-red-500 text-white font-bold px-4 hover:bg-red-600">إلغاء المهمة</button>
                             </div>
                         </div>
 
-                        {(hud.view === 'DRONE_EARTH' || hud.view === 'DRONE_SPACE') && (
-                            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-24 h-24 border border-white/30 flex items-center justify-center pointer-events-none">
-                                <div className="absolute top-0 w-0.5 h-6 bg-white" />
-                                <div className="absolute bottom-0 w-0.5 h-6 bg-white" />
-                                <div className="absolute left-0 w-6 h-0.5 bg-white" />
-                                <div className="absolute right-0 w-6 h-0.5 bg-white" />
-                                <div className="w-1 h-1 bg-red-500 rounded-full" />
+                        {/* CENTER CROSSHAIR */}
+                        <div className="absolute inset-0 flex items-center justify-center">
+                            <div className="w-64 h-64 relative text-white/80">
+                                <div className="absolute top-0 left-0 w-8 h-8 border-t-[3px] border-l-[3px] border-white/80" />
+                                <div className="absolute top-0 right-0 w-8 h-8 border-t-[3px] border-r-[3px] border-white/80" />
+                                <div className="absolute bottom-0 left-0 w-8 h-8 border-b-[3px] border-l-[3px] border-white/80" />
+                                <div className="absolute bottom-0 right-0 w-8 h-8 border-b-[3px] border-r-[3px] border-white/80" />
+                                
+                                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 w-56 h-[1px] bg-white/20" />
+                                <div className="absolute top-1/2 left-1/2 -translate-y-1/2 w-[1px] h-56 bg-white/20" />
+                                <div className="absolute top-1/2 left-1/2 w-1.5 h-1.5 bg-red-500 rounded-full -translate-x-1/2 -translate-y-1/2 shadow-[0_0_15px_#f00]" />
+
+                                <button onPointerDown={(e) => { e.stopPropagation(); setZoomIdx((zoomIdx+1)%3); }} className="absolute -left-20 bottom-0 pointer-events-auto bg-black/80 border border-white/30 px-3 py-1 text-lg font-bold hover:bg-white hover:text-black">
+                                    {zoomStrs[zoomIdx]}
+                                </button>
                             </div>
-                        )}
-                        {hud.view === 'GROUND_FPS' && (
-                            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none flex flex-col items-center justify-center">
-                                 <div className="w-1 h-4 bg-green-400 opacity-80 mb-4" />
-                                 <div className="flex gap-4">
-                                     <div className="w-4 h-1 bg-green-400 opacity-80" />
-                                     <div className="w-1 h-1 bg-green-400" />
-                                     <div className="w-4 h-1 bg-green-400 opacity-80" />
-                                 </div>
-                                 <div className="w-1 h-4 bg-green-400 opacity-80 mt-4" />
+                            
+                            <div className="absolute right-24 h-96 w-16 border-r-2 border-white/30 flex flex-col justify-between items-end pr-3 text-sm text-white/50">
+                                {[80,60,40,20,0,-20,-40,-60,-80].map(v => (
+                                    <div key={v} className="flex items-center gap-2">
+                                        <span className={v===0 ? 'text-white font-bold' : ''}>{v > 0 ? '+'+v : v}</span>
+                                        <div className={`h-[2px] bg-white/30 ${v===0 ? 'w-6 bg-white' : 'w-3'}`} />
+                                    </div>
+                                ))}
                             </div>
-                        )}
-                        
-                        <div className="flex justify-between items-end pb-8 px-4 h-1/2 w-full pointer-events-none">
-                            <Joystick side="left" onMove={handleInputL} />
-                            <Joystick side="right" onMove={handleInputR} />
-                            <button onPointerDown={(e) => { e.stopPropagation(); engineRef.current?.fire(); }} 
-                                    className="absolute right-8 bottom-8 pointer-events-auto rounded-full w-24 h-24 bg-red-600/80 border-4 border-white/80 shadow-[0_0_30px_rgba(255,0,0,0.6)] active:bg-red-400 active:scale-95 transition-all outline-none flex items-center justify-center">
-                                <span className="text-white font-bold tracking-widest text-xl">{hud.view === 'GROUND_FPS' ? 'FIRE' : 'LAUNCH'}</span>
-                            </button>
+                        </div>
+
+                        {/* HUD BOTTOM */}
+                        <div className="flex justify-between items-end">
+                            <Joystick onMove={(x, y) => { if(engineRef.current) { engineRef.current.inputL.x = x; engineRef.current.inputL.y = y; } }} />
+                            
+                            <div className="flex items-end gap-6 pointer-events-auto pr-8 pb-4">
+                                <div className="bg-black/80 border border-white/20 p-4 pb-2 w-36 flex flex-col items-center">
+                                    <div className="w-full h-16 border border-white/50 mb-2 relative flex items-center justify-center">
+                                        <div className="absolute inset-0 bg-red-600/20" />
+                                        <div className="w-10 h-2 bg-white rounded-full relative">
+                                            <div className="absolute -left-1 -top-1 border-t-[3px] border-r-[3px] border-white w-3 h-3 rotate-45" />
+                                        </div>
+                                    </div>
+                                    <span className="text-xs text-white/80 font-bold tracking-widest mb-1">صاروخ موجه</span>
+                                    <div className="w-full h-1 bg-green-500 shadow-[0_0_10px_#0f0]" />
+                                </div>
+                                <button onPointerDown={(e) => { e.stopPropagation(); handleFire(); }} className="w-32 h-32 rounded-full bg-red-700/90 border-[6px] border-black shadow-[0_0_0_4px_#ef4444,0_0_40px_rgba(239,68,68,0.8)] outline-none active:bg-red-500 active:scale-95 transition-transform text-white font-black text-2xl flex items-center justify-center hover:bg-red-600">
+                                    FIRE
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </>
