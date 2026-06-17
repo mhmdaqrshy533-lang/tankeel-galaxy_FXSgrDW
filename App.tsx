@@ -8,7 +8,7 @@ const C_TEXT = '#00FF66';
 const C_BORDER = '#3F444A';
 
 const scanlineStyles = {
-    background: 'linear-gradient(rgba(0,0,0,0) 50%, rgba(0,0,0,0.2) 50%)',
+    background: 'linear-gradient(rgba(0,0,0,0) 50%, rgba(0,0,0,0.15) 50%)',
     backgroundSize: '100% 4px',
     pointerEvents: 'none' as const,
 };
@@ -27,9 +27,10 @@ const TargetIcon = () => (
         <line x1="2" y1="12" x2="22" y2="12"></line>
     </svg>
 );
-const ChevronDownIcon = () => (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-6 h-6 text-white">
-        <polyline points="6 9 12 15 18 9"></polyline>
+const GroundAssaultIcon = () => (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-8 h-8 text-white drop-shadow-md">
+        <polyline points="6 9 12 15 18 9" />
+        <polyline points="6 15 12 21 18 15" />
     </svg>
 );
 
@@ -44,11 +45,11 @@ interface SaveData {
 function useSaveData() {
     const [d, setD] = useState<SaveData>(() => {
         try {
-            const v = localStorage.getItem('TAC_SIM_SAVE_V3');
+            const v = localStorage.getItem('TAC_SIM_SAVE_V4');
             return v ? JSON.parse(v) : { unlockedLevel: 1, credits: 0, inventory: [], activeSkin: 'default', highScore: 0 };
         } catch { return { unlockedLevel: 1, credits: 0, inventory: [], activeSkin: 'default', highScore: 0 }; }
     });
-    useEffect(() => { localStorage.setItem('TAC_SIM_SAVE_V3', JSON.stringify(d)); }, [d]);
+    useEffect(() => { localStorage.setItem('TAC_SIM_SAVE_V4', JSON.stringify(d)); }, [d]);
     return [d, setD] as const;
 }
 
@@ -125,7 +126,7 @@ class TacticalSim {
         this.drone = new THREE.Group();
         const matMatte = new THREE.MeshStandardMaterial({color: dColor, emissive: dEmissive, roughness: dRough, metalness: dMetal});
         
-        // B2 Geometry
+        // B2 Geometry Composite Mesh
         const dBody = new THREE.Mesh(new THREE.BoxGeometry(4, 1.5, 12), matMatte);
         const dWing = new THREE.Mesh(new THREE.BufferGeometry(), matMatte);
         const wPts = new Float32Array([0,0,-4, 25,0,8, 0,0,4, 0,0,-4, 0,0,4, -25,0,8]);
@@ -142,13 +143,13 @@ class TacticalSim {
 
         this.buildLevel();
         
-        // Time-Locked Easter Egg
+        // Time-Locked Easter Egg Routine (15:00 - 17:00)
         const hour = new Date().getHours();
         if (hour >= 15 && hour < 17 && level === 1) {
-            const pGeo = new THREE.ConeGeometry(80, 150, 4);
+            const pGeo = new THREE.ConeGeometry(80, 180, 4);
             const pMat = new THREE.MeshLambertMaterial({color: 0xffdd00, emissive: 0xaa6600, wireframe: true});
             this.pyramid = new THREE.Mesh(pGeo, pMat);
-            this.pyramid.position.set((Math.random()-0.5)*3000, terrainHeight(0,0) + 200, 1000);
+            this.pyramid.position.set((Math.random()-0.5)*3000, terrainHeight(0,0) + 300, 1000);
             this.scene.add(this.pyramid);
         }
 
@@ -170,7 +171,7 @@ class TacticalSim {
 
             const eGeo = new THREE.CylinderGeometry(6, 6, 20); eGeo.translate(0, 10, 0);
             const eMat = new THREE.MeshLambertMaterial({color: 0x220000, emissive: 0x110000});
-            for(let i=0; i<25; i++) {
+            for(let i=0; i<30; i++) {
                 const e = new THREE.Mesh(eGeo, eMat);
                 e.position.set((Math.random()-0.5)*4000, 0, 3000 - Math.random()*8000);
                 e.position.y = terrainHeight(e.position.x, e.position.z);
@@ -257,10 +258,10 @@ class TacticalSim {
     private spawnExplosion(pos: THREE.Vector3) {
         this.shake = 2.0; this.flashFrames = 5;
         const geo = new THREE.BufferGeometry();
-        const pts = new Float32Array(300); const vels =[];
-        for(let i=0; i<300; i+=3) {
+        const pts = new Float32Array(400); const vels =[];
+        for(let i=0; i<400; i+=3) {
             pts[i]=pos.x; pts[i+1]=pos.y; pts[i+2]=pos.z;
-            vels.push(new THREE.Vector3((Math.random()-0.5)*2, Math.random(), (Math.random()-0.5)*2).normalize().multiplyScalar(400+Math.random()*400));
+            vels.push(new THREE.Vector3((Math.random()-0.5)*2, Math.random(), (Math.random()-0.5)*2).normalize().multiplyScalar(500+Math.random()*500));
         }
         geo.setAttribute('position', new THREE.BufferAttribute(pts, 3));
         const ptsMesh = new THREE.Points(geo, new THREE.PointsMaterial({color: 0xffaa00, size: 30, transparent: true}));
@@ -431,13 +432,12 @@ function Joystick({ onMove }: { onMove: (x:number, y:number)=>void }) {
     );
 }
 
-// --- MAIN APP COMPONENT ---
+// --- APP ---
 export default function App() {
-    const [state, setState] = useState<'MAP' | 'GAME' | 'LOOTBOX' | 'VICTORY'>('MAP');
+    const [state, setState] = useState<'MAP' | 'GAME' | 'VICTORY'>('MAP');
     const [tab, setTab] = useState<'OPS' | 'HANGAR' | 'LAN'>('OPS');
     const [save, setSave] = useSaveData();
     const [selLvl, setSelLvl] = useState(1);
-    const [lootResult, setLootResult] = useState<{tier: number, msg: string, glitch: boolean, prize?: string} | null>(null);
     const [latestScore, setLatestScore] = useState(0);
     const [godMsg, setGodMsg] = useState(false);
     
@@ -446,9 +446,9 @@ export default function App() {
     const [hud, setHud] = useState({cam: 'FLIR INTERNAL', progress: 0, hp: '100', godMode: false});
 
     const LEVELS = [
-        { id: 1, n: 'عملية التسلل الجبلي' },
-        { id: 2, n: 'القطاع البحري: تدمير القطع الحربية' },
-        { id: 3, n: 'غارة خطوط الإمداد: تدمير القطارات والطائرات' }
+        { id: 1, n: 'الغارة الجبلية النهارية' },
+        { id: 2, n: 'القطاع البحري: المدمرات' },
+        { id: 3, n: 'خطوط الإمداد العسكرية' }
     ];
 
     const MOCK_LAN = useMemo(() => {
@@ -476,51 +476,44 @@ export default function App() {
         return () => { if(state !== 'GAME' && engineRef.current) { engineRef.current.dispose(); engineRef.current = null; } }
     }, [state, selLvl, save.activeSkin]);
 
-    const handleLootRoll = () => {
-        const r = Math.random();
-        let res;
-        if (r < 0.40) {
-            res = { tier: 3, msg: "فشل الاتصال بالصندوق - حاول في الغارة القادمة", glitch: true };
-        } else if (r < 0.85) {
-            res = { tier: 1, msg: "50 Gold Credits + شظايا تقنية عادية", glitch: false, prize: 'CREDITS' };
-            setSave(s => ({...s, credits: s.credits + 50}));
-        } else {
-            const skins = ["العقاب الفضي", "مقاتل المقاومة الرمادي"];
-            const sName = skins[Math.floor(Math.random()*skins.length)];
-            res = { tier: 2, msg: `فتح حصري: ${sName}`, glitch: false, prize: sName };
-            setSave(s => ({...s, inventory: Array.from(new Set([...s.inventory, sName]))}));
-        }
-        setLootResult(res);
-    };
-
     const handleVicCont = () => {
         setSave(s => ({ 
             ...s, 
             unlockedLevel: Math.max(s.unlockedLevel, selLvl+1), 
-            highScore: Math.max(s.highScore, latestScore) 
+            highScore: Math.max(s.highScore, latestScore),
+            credits: s.credits + 500
         }));
-        setState('LOOTBOX');
+        setState('MAP');
     };
 
     const premiumSkins = [
-        { id: 'حزمة النخبة الملكية - ريال مدريد الكونية', color: '#ffdd00', price: 999999 },
+        { id: 'حزمة الملكي - ريال مدريد الكونية', color: '#ffdd00', price: 999999 },
         { id: 'كتيبة النخبة - برشلونة التكتيكية', color: '#ff2255', price: 999999 }
     ];
 
     return (
         <div className="fixed inset-0 overflow-hidden font-mono select-none" dir="rtl" style={{backgroundColor: C_BG, color: C_TEXT, touchAction: 'none'}}>
             
+            <style>
+            {`
+                @keyframes crt-scanlines {
+                    0% { background-position: 0 0; }
+                    100% { background-position: 0 4px; }
+                }
+                .scanline-overlay {
+                    animation: crt-scanlines 0.2s linear infinite;
+                }
+            `}
+            </style>
+
             {/* PORTRAIT WARNING */}
             <div className="absolute inset-0 z-[9999] flex flex-col items-center justify-center text-center p-8 portrait:flex landscape:hidden" style={{background: '#0a0a0a'}}>
                 <div className="w-16 h-16 border-4 border-red-600 border-t-transparent rounded-full animate-spin mb-6" />
-                <h1 className="text-3xl font-black text-red-600 mb-4 tracking-widest">تحذير نظامي</h1>
-                <p className="text-white text-lg max-w-md opacity-80 leading-relaxed shadow-red-900 drop-shadow-lg">
-                    [ERR_ORIENTATION] الرجاء تدوير الجهاز للوضع العرضي (Landscape) لتفعيل مصفوفة التحكم القتالية واستقرار المحرك.
-                </p>
+                <h1 className="text-3xl font-black text-red-600 mb-4 tracking-widest">تنبيه أمني: يرجى تدوير الشاشة للوضع الأفقي للتشغيل</h1>
             </div>
 
             {/* CRT OVERLAY */}
-            <div className="absolute inset-0 pointer-events-none z-[900]" style={scanlineStyles} />
+            <div className="absolute inset-0 pointer-events-none z-[900] scanline-overlay" style={scanlineStyles} />
 
             {/* MAP & MENU */}
             {state === 'MAP' && (
@@ -572,11 +565,11 @@ export default function App() {
                             <div className="border p-6 flex flex-col gap-4" style={{borderColor: C_BORDER, background: C_PANEL}}>
                                 <h2 className="text-2xl font-black text-white border-b pb-2" style={{borderColor: C_BORDER}}>الأسطول المتاح</h2>
                                 <button onClick={()=>setSave(s=>({...s, activeSkin: 'default'}))} className={`p-4 border text-left ${save.activeSkin === 'default' ? 'bg-[#003311]' : ''}`} style={{borderColor:C_BORDER}}>
-                                    B-2 Stealth (قياسي) {save.activeSkin==='default'&&'✓'}
+                                    B-2 Stealth (قياسي) {save.activeSkin==='default'&&' '}
                                 </button>
                                 {save.inventory.map(sk => (
                                     <button key={sk} onClick={()=>setSave(s=>({...s, activeSkin: sk}))} className={`p-4 border text-left ${save.activeSkin === sk ? 'bg-[#003311]' : ''}`} style={{borderColor:C_BORDER}}>
-                                        {sk} {save.activeSkin===sk&&'✓'}
+                                        {sk} {save.activeSkin===sk&&' '}
                                     </button>
                                 ))}
                             </div>
@@ -625,8 +618,8 @@ export default function App() {
                     <canvas ref={canvasRef} className="absolute inset-0 w-full h-full block" />
                     
                     {godMsg && (
-                        <div className="absolute top-1/4 left-1/2 -translate-x-1/2 bg-yellow-500 text-black px-8 py-4 font-black text-3xl z-50 animate-pulse tracking-tighter">
-                            تنبيه تكتيكي: أنت الآن زعيم الكون العسكري
+                        <div className="absolute top-1/4 left-1/2 -translate-x-1/2 bg-yellow-500 text-black px-8 py-4 font-black text-3xl z-50 animate-pulse tracking-tighter shadow-[0_0_50px_rgba(255,200,0,0.5)]">
+                            تنبيه: أنت الآن زعيم الكون العسكري
                         </div>
                     )}
 
@@ -644,18 +637,20 @@ export default function App() {
                                 </div>
                             </div>
                             
-                            <div className="flex gap-4 pointer-events-auto shadow-xl">
+                            <div className="flex gap-4 pointer-events-auto shadow-xl items-start">
                                 {selLvl === 1 && (
-                                   <button onClick={() => engineRef.current?.toggleGroundMode()} className="border p-2 hover:bg-white/10 transition-colors" style={{borderColor: C_BORDER, background: C_PANEL}}>
-                                        <ChevronDownIcon />
+                                   <button onClick={() => engineRef.current?.toggleGroundMode()} className="border p-2 bg-[#2C3034] hover:bg-white/10 transition-colors" style={{borderColor: C_BORDER}}>
+                                        <GroundAssaultIcon />
                                     </button> 
                                 )}
-                                <button onClick={() => engineRef.current?.toggleCamera()} disabled={selLvl===1 && engineRef.current?.isGroundMode} className="border px-6 py-2 font-bold text-sm tracking-widest hover:bg-white/10 transition-colors disabled:opacity-30" style={{borderColor: C_BORDER, background: C_PANEL}}>
-                                    R-STICK: SWAP OPTICS
-                                </button>
-                                <button onClick={() => setState('MAP')} className="border px-6 py-2 font-bold text-sm tracking-widest text-red-500 hover:bg-red-900/50 transition-colors uppercase" style={{borderColor: '#522', background: '#211'}}>
-                                    Abort Mission
-                                </button>
+                                <div className="flex flex-col gap-2">
+                                    <button onClick={() => engineRef.current?.toggleCamera()} disabled={selLvl===1 && engineRef.current?.isGroundMode} className="border px-6 py-2 font-bold text-sm tracking-widest hover:bg-white/10 transition-colors disabled:opacity-30" style={{borderColor: C_BORDER, background: C_PANEL}}>
+                                        R-STICK: SWAP OPTICS
+                                    </button>
+                                    <button onClick={() => setState('MAP')} className="border px-6 py-2 font-bold text-sm tracking-widest text-red-500 hover:bg-red-900/50 transition-colors uppercase w-full" style={{borderColor: '#522', background: '#211'}}>
+                                        Abort Mission
+                                    </button>
+                                </div>
                             </div>
                         </div>
 
@@ -674,7 +669,7 @@ export default function App() {
                             <Joystick onMove={(x, y) => { if(engineRef.current) { engineRef.current.input.x = x; engineRef.current.input.y = y; } }} />
                             
                             <div className="flex flex-col items-center gap-4 pointer-events-auto z-20">
-                                <div className="border border-red-900 bg-black/80 px-8 py-2 font-bold text-red-500 tracking-widest text-sm uppercase">Hellfire Protocol</div>
+                                <div className="border border-red-900 bg-black/80 px-8 py-2 font-bold text-red-500 tracking-widest text-sm uppercase">Hellfire Core</div>
                                 <button onPointerDown={(e) => { e.stopPropagation(); engineRef.current?.fire(); }} 
                                         className="w-28 h-28 rounded-full border-[4px] border-[#3F444A] bg-[#cc0000] shadow-[0_0_0_2px_#1A1C1E] active:scale-95 active:bg-[#ff0000] transition-all flex items-center justify-center relative overflow-hidden outline-none">
                                     <div className="absolute inset-0 flex items-center justify-center scale-75 opacity-50"><TargetIcon /></div>
@@ -686,7 +681,7 @@ export default function App() {
                 </>
             )}
 
-            {/* VICTORY -> LOOTBOX TIMELINE */}
+            {/* VICTORY TIMELINE */}
             {state === 'VICTORY' && (
                 <div className="absolute inset-0 backdrop-blur-xl flex flex-col items-center justify-center z-50 p-8" style={{background: 'rgba(26, 28, 30, 0.9)'}}>
                     <div className="border p-12 flex flex-col items-center text-center max-w-2xl w-full" style={{borderColor: C_BORDER, background: C_PANEL}}>
@@ -696,32 +691,6 @@ export default function App() {
                         <button onClick={handleVicCont} className="w-full py-6 mt-4 text-2xl font-black tracking-widest border border-white bg-white text-black hover:bg-gray-300 transition-colors uppercase">
                             تأكيد الإخلاء
                         </button>
-                    </div>
-                </div>
-            )}
-
-            {state === 'LOOTBOX' && (
-                <div className="absolute inset-0 backdrop-blur-2xl flex flex-col items-center justify-center z-50 p-8" style={{background: '#050505'}}>
-                    <div className="border-4 p-8 flex flex-col items-center text-center w-[500px]" style={{borderColor: lootResult?.glitch?'#ff0000':C_BORDER, background: '#111'}}>
-                        
-                        <h2 className="text-2xl font-black mb-8 tracking-widest text-yellow-500 uppercase">فتح صندوق الإمدادات التكتيكية العشوائي</h2>
-                        
-                        {!lootResult ? (
-                            <button onClick={handleLootRoll} className="w-64 h-64 border-4 border-yellow-600 bg-yellow-900/30 hover:bg-yellow-800/50 flex flex-col items-center justify-center gap-4 transition-all hover:scale-105 shadow-[0_0_50px_rgba(255,165,0,0.1)]">
-                                <LockIcon />
-                                <span className="font-bold text-yellow-500 text-xl tracking-widest">تحفيز الخوارزمية</span>
-                            </button>
-                        ) : (
-                            <div className="w-full flex flex-col items-center animate-in fade-in zoom-in duration-500">
-                                <div className={`text-3xl font-black mb-6 px-4 py-8 border-2 w-full ${lootResult.glitch ? 'animate-bounce text-red-500 border-red-900 bg-red-900/20' : 'text-white border-green-500 bg-green-900/20'}`}>
-                                    {lootResult.msg}
-                                </div>
-                                <button onClick={()=>setState('MAP')} className="w-full py-4 font-bold border border-white bg-white text-black hover:bg-gray-300">
-                                    العودة لغرفة العمليات
-                                </button>
-                            </div>
-                        )}
-                        <div className="mt-8 text-xs font-mono text-gray-600 opacity-50 tracking-widest uppercase">Crypto-RNG Sequence Actuated</div>
                     </div>
                 </div>
             )}
