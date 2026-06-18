@@ -1,841 +1,911 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import * as THREE from 'three';
 
-// --- STYLING & CRT CONSTANTS ---
-const C_BG = '#1A1C1E';
-const C_PANEL = '#2C3034';
-const C_TEXT = '#00FF66';
-const C_BORDER = '#3F444A';
+// ============================================================================
+// AAA GAME CONSTANTS & CONFIGURATION
+// ============================================================================
 
-const scanlineStyles = {
-    background: 'linear-gradient(rgba(0,0,0,0) 50%, rgba(0,0,0,0.15) 50%)',
-    backgroundSize: '100% 4px',
-    pointerEvents: 'none' as const,
+const C_BG = '#030406';
+const C_PANEL = '#0A0D10';
+const C_PANEL_HOVER = '#10151A';
+const C_BORDER_DIM = '#1C2329';
+const C_BORDER_FOCUS = '#2D3944';
+const C_ACCENT = '#00FF66'; // Tactical Green
+const C_DANGER = '#FF0055'; // Tactical Pink/Red
+const C_TEXT = '#E2E8F0';
+const C_TEXT_DIM = '#64748B';
+
+const VALID_CODES = ['SGM-2026-VIP', 'DEV-ALPHA-1337', 'OPERATOR-X'];
+
+const RANKS = [
+    { name: 'مُجند (Recruit)', xp: 0 },
+    { name: 'جندي (Soldier)', xp: 1000 },
+    { name: 'عريف (Corporal)', xp: 3000 },
+    { name: 'رقيب (Sergeant)', xp: 6000 },
+    { name: 'ملازم (Lieutenant)', xp: 10000 },
+    { name: 'نقيب (Captain)', xp: 15000 },
+    { name: 'رائد (Major)', xp: 22000 },
+    { name: 'عقيد (Colonel)', xp: 30000 },
+    { name: 'جنرال (General)', xp: 50000 }
+];
+
+const GARAGE = {
+    AIR: [
+        { id: 'jet_stealth', name: 'B-2 Ghost Stealth Bomber', type: 'AIR', desc: 'Advanced radar evasion and heavy payload.' },
+        { id: 'jet_fighter', name: 'F-22 Raptor Interceptor', type: 'AIR', desc: 'Air superiority and unmatched agility.' },
+        { id: 'heli_attack', name: 'AH-64 Apache', type: 'AIR', desc: 'Close air support and sustained firepower.' }
+    ],
+    GROUND: [
+        { id: 'tank_main', name: 'M1A2 Abrams', type: 'GROUND', desc: 'Heavy armor and 120mm smoothbore cannon.' },
+        { id: 'apc_light', name: 'Stryker ICV', type: 'GROUND', desc: 'Rapid troop deployment and mobility.' }
+    ],
+    NAVAL: [
+        { id: 'ship_destroyer', name: 'Arleigh Burke', type: 'NAVAL', desc: 'Guided missile destroyer for coastal bombardment.' }
+    ]
 };
 
-// --- ICONS ---
-const LockIcon = () => (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-8 h-8 text-red-500 opacity-80">
-        <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-        <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-    </svg>
-);
-const TargetIcon = () => (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" className="w-full h-full opacity-50">
-        <circle cx="12" cy="12" r="10" />
-        <line x1="12" y1="2" x2="12" y2="22" />
-        <line x1="2" y1="12" x2="22" y2="12" />
-    </svg>
-);
-const CameraIcon = () => (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-6 h-6">
-        <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
-        <circle cx="12" cy="13" r="4" />
-    </svg>
-);
-const DismountIcon = () => (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-6 h-6">
-        <polyline points="6 9 12 15 18 9" />
-        <polyline points="6 15 12 21 18 15" />
-    </svg>
-);
-const JetIcon = () => (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-6 h-6">
-        <polyline points="18 15 12 9 6 15" />
-        <path d="M12 9v13" />
-    </svg>
-);
-const MusicIcon = () => (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-6 h-6">
-        <path d="M9 18V5l12-2v13" />
-        <circle cx="6" cy="18" r="3" />
-        <circle cx="18" cy="16" r="3" />
-    </svg>
-);
+// ============================================================================
+// ICONS (SVG)
+// ============================================================================
 
-// --- PERSISTENT STATE ---
-interface SaveData {
-    unlockedLevel: number;
-    credits: number;
-    inventory: string[];
-    activeSkin: string;
-    highScore: number;
+const IconCrosshair = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-full h-full"><circle cx="12" cy="12" r="10"/><path d="M12 2v20M2 12h20"/></svg>;
+const IconLock = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-5 h-5"><rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></svg>;
+const IconPlay = () => <svg viewBox="0 0 24 24" fill="currentColor" className="w-8 h-8"><path d="M5 3l14 9-14 9V3z" /></svg>;
+const IconUser = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-6 h-6"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>;
+const IconShield = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-6 h-6"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>;
+const IconSettings = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-6 h-6"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>;
+const IconCamera = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-8 h-8"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>;
+const IconMusic = () => <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-8 h-8"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>;
+
+// ============================================================================
+// PROFILE & PERSISTENCE
+// ============================================================================
+
+interface SGMProfile {
+    username: string;
+    xp: number;
+    usedCodes: string[];
+    unlockedVehicles: string[];
+    activeAir: string;
+    activeGround: string;
+    activeNaval: string;
+    settings: { graphics: 'LOW' | 'MED' | 'HIGH'; volume: number; };
 }
-function useSaveData() {
-    const [d, setD] = useState<SaveData>(() => {
-        try {
-            const v = localStorage.getItem('TAC_SIM_SAVE_V5');
-            return v ? JSON.parse(v) : { unlockedLevel: 1, credits: 0, inventory: [], activeSkin: 'default', highScore: 0 };
-        } catch { return { unlockedLevel: 1, credits: 0, inventory: [], activeSkin: 'default', highScore: 0 }; }
+
+const DEFAULT_PROFILE: SGMProfile = {
+    username: 'Operator-001',
+    xp: 0,
+    usedCodes: [],
+    unlockedVehicles: ['jet_stealth', 'tank_main', 'ship_destroyer'],
+    activeAir: 'jet_stealth',
+    activeGround: 'tank_main',
+    activeNaval: 'ship_destroyer',
+    settings: { graphics: 'HIGH', volume: 80 }
+};
+
+function useSGMProfile() {
+    const [profile, setProfile] = useState<SGMProfile>(() => {
+        try { const saved = localStorage.getItem('SGMW_AAA_SAVE_V2'); return saved ? JSON.parse(saved) : DEFAULT_PROFILE; } 
+        catch { return DEFAULT_PROFILE; }
     });
-    useEffect(() => { localStorage.setItem('TAC_SIM_SAVE_V5', JSON.stringify(d)); }, [d]);
-    return [d, setD] as const;
-}
 
-// --- PROCEDURAL FBM MATH ---
-function noise(x: number, z: number) {
-    return Math.sin(x) * Math.cos(z);
-}
-function getTerrainHeight(x: number, z: number) {
-    let y = 0;
-    y += noise(x * 0.003, z * 0.003) * 200;
-    y += noise(x * 0.01, z * 0.015) * 40;
-    return y;
-}
-
-// --- TERRAIN ENGINE ---
-class TerrainManager {
-    chunks = new Map<string, THREE.Mesh>();
-    scene: THREE.Scene;
-    mat = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
-
-    constructor(scene: THREE.Scene) {
-        this.scene = scene;
-    }
-
-    update(pos: THREE.Vector3) {
-        const size = 2000;
-        const cx = Math.floor(pos.x / size);
-        const cz = Math.floor(pos.z / size);
-        const active = new Set();
-        
-        for (let i = -1; i <= 1; i++) {
-            for (let j = -1; j <= 1; j++) {
-                const id = `${cx+i}_${cz+j}`;
-                active.add(id);
-                if (!this.chunks.has(id)) {
-                    const geom = new THREE.PlaneGeometry(size, size, 32, 32);
-                    geom.rotateX(-Math.PI/2);
-                    const positions = geom.attributes.position;
-                    const colors = [];
-                    const c = new THREE.Color();
-                    for (let k = 0; k < positions.count; k++) {
-                        const vx = positions.getX(k) + (cx+i)*size;
-                        const vz = positions.getZ(k) + (cz+j)*size;
-                        const vy = getTerrainHeight(vx, vz);
-                        positions.setY(k, vy);
-                        
-                        if (vy > 100) c.setHex(0x3a4d31); else c.setHex(0x2a3d23);
-                        colors.push(c.r, c.g, c.b);
-                    }
-                    geom.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-                    geom.computeVertexNormals();
-                    const mesh = new THREE.Mesh(geom, this.mat);
-                    mesh.position.set((cx+i)*size, 0, (cz+j)*size);
-                    this.scene.add(mesh);
-                    this.chunks.set(id, mesh);
-                }
-            }
+    useEffect(() => { localStorage.setItem('SGMW_AAA_SAVE_V2', JSON.stringify(profile)); }, [profile]);
+    
+    const getRank = (xp: number) => {
+        let currentRank = RANKS[0];
+        let nextRank = RANKS[1];
+        for (let i = 0; i < RANKS.length; i++) {
+            if (xp >= RANKS[i].xp) { currentRank = RANKS[i]; nextRank = RANKS[i+1] || RANKS[i]; }
         }
+        return { currentRank, nextRank };
+    };
 
-        for (const [id, chunk] of this.chunks) {
-            if (!active.has(id)) {
-                this.scene.remove(chunk);
-                chunk.geometry.dispose();
-                this.chunks.delete(id);
-            }
-        }
-    }
+    return { profile, setProfile, getRank };
 }
 
-// --- ENGINE CLASS ---
-interface TacticalTarget {
-    mesh: THREE.Object3D;
-    hp: number;
-    active: boolean;
+// ============================================================================
+// SHADERS & TEXTURE GENERATORS
+// ============================================================================
+
+function createHeroVestTexture(username: string) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 1024; canvas.height = 1024;
+    const ctx = canvas.getContext('2d')!;
+    
+    // Yemen Flag Colors (Red, White, Black)
+    ctx.fillStyle = '#CE1126'; ctx.fillRect(0, 0, 1024, 341);
+    ctx.fillStyle = '#FFFFFF'; ctx.fillRect(0, 341, 1024, 342);
+    ctx.fillStyle = '#000000'; ctx.fillRect(0, 683, 1024, 341);
+    
+    // Text Overlay
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#111111';
+    ctx.font = '900 120px "Courier New", monospace';
+    ctx.fillText('تنكيل-SGMW', 512, 450);
+    
+    ctx.fillStyle = '#111111';
+    ctx.font = 'bold 80px "Courier New", monospace';
+    ctx.fillText(username, 512, 580);
+    
+    return new THREE.CanvasTexture(canvas);
 }
 
-class TacticalSim {
+// ============================================================================
+// SGMW AAA WEBGL ENGINE
+// ============================================================================
+
+class TacticalEngine {
     public renderer: THREE.WebGLRenderer;
     public scene: THREE.Scene;
     
-    public cameraCockpit: THREE.PerspectiveCamera;
-    public cameraChase: THREE.PerspectiveCamera;
-    public cameraTop: THREE.PerspectiveCamera;
-    public cameraFLIR: THREE.PerspectiveCamera;
-    public cameraPlayer: THREE.PerspectiveCamera;
-    public activeCamera: THREE.PerspectiveCamera;
-    public camIndex = 0; // 0=Cockpit, 1=Chase, 2=Top, 3=FLIR
-
-    public jet: THREE.Group;
-    public player: THREE.Group;
-    public cockpitGroup: THREE.Group;
-    public radarRing: THREE.Mesh;
-    public radarBlips: THREE.Mesh[] = [];
-    
-    public targets: TacticalTarget[] = [];
-    public missiles: { mesh: THREE.Mesh, vel: THREE.Vector3, life: number }[] = [];
-    public explosions: { mesh: THREE.Points, life: number, vels: THREE.Vector3[] }[] = [];
-    
-    public terrainManager: TerrainManager;
+    // Physics & Timing
     private clock = new THREE.Clock();
+    public state: 'BRIEFING' | 'DEPLOYED' | 'SPACE_TRANSITION' | 'VICTORY' = 'DEPLOYED';
     
-    public level: number;
-    public state: 'AIR' | 'LANDING' | 'GROUND' | 'BOARDING' | 'CINEMATIC' = 'AIR';
-    public input = { x: 0, y: 0 };
-    public sprinting = false;
-    public crouching = false;
+    // Cameras
+    public camMain = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 1, 100000);
+    public camMode: 'FPS' | 'TPS' | 'DRONE' | 'CINEMATIC' = 'TPS';
     
-    public onVictory?: (score: number) => void;
-    public onSync?: (data: any) => void;
-    public onGodModeTrigger?: () => void;
+    // Input Vectors
+    public input = { x: 0, y: 0, sprint: false, crouch: false };
     
-    private shake = 0;
-    private flashFrames = 0;
-    private godMode = false;
-    private pyramid?: THREE.Mesh;
-    private score = 0;
+    // Player / Vehicle Entities
+    public heroMode: 'GROUND' | 'AIR' = 'AIR';
+    public jet = new THREE.Group();
+    public player = new THREE.Group();
     
-    // Cinematic assets
-    private cinematicTime = 0;
-    private spaceInit = false;
-    private stars?: THREE.Points;
+    // Physics States
+    private airSpeed = 600;
+    private maxAirSpeed = 2000;
+    private airPitch = 0;
+    private airRoll = 0;
+    public throttleActive = false;
+    
+    private groundSpeed = 0;
+    private dodgeLife = 0;
+    private dodgeDir = 1;
+    
+    // Procedural Environment
+    private terrainMat = new THREE.MeshStandardMaterial({ color: 0x1A281A, roughness: 0.9, flatShading: true });
+    private targets: { mesh: THREE.Mesh, hp: number, active: boolean }[] = [];
+    private projectiles: { mesh: THREE.Mesh, vel: THREE.Vector3, life: number }[] = [];
+    private explosions: { ring: THREE.Mesh, parts: THREE.Points, life: number, vels: THREE.Vector3[] }[] = [];
+    
+    // Atmosphere & Space
+    private spaceGroup = new THREE.Group();
     private earth?: THREE.Mesh;
+    private cinematicTime = 0;
+    
+    // FX
+    private flashFrames = 0;
+    private shakeMag = 0;
 
-    constructor(canvas: HTMLCanvasElement, level: number, skin: string) {
-        const w = window.innerWidth; const h = window.innerHeight;
-        this.level = level;
-        this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: "high-performance" });
-        this.renderer.setSize(w, h);
-        
+    // Callbacks
+    public onSync?: (data: any) => void;
+    public onVictory?: () => void;
+    
+    private username: string;
+
+    constructor(canvas: HTMLCanvasElement, username: string) {
+        this.username = username;
+        this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+        this.renderer.setSize(window.innerWidth, window.innerHeight);
+        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        this.renderer.shadowMap.enabled = true;
+        this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
         this.scene = new THREE.Scene();
-        this.scene.fog = new THREE.FogExp2(0x87CEEB, 0.0002);
         this.scene.background = new THREE.Color(0x87CEEB);
+        this.scene.fog = new THREE.FogExp2(0x87CEEB, 0.00015);
 
-        this.cameraCockpit = new THREE.PerspectiveCamera(60, w/h, 1, 30000);
-        this.cameraChase = new THREE.PerspectiveCamera(60, w/h, 1, 30000);
-        this.cameraTop = new THREE.PerspectiveCamera(70, w/h, 1, 30000);
-        this.cameraFLIR = new THREE.PerspectiveCamera(40, w/h, 1, 30000);
-        this.cameraPlayer = new THREE.PerspectiveCamera(70, w/h, 1, 30000);
-        this.activeCamera = this.cameraCockpit;
-
-        const amb = new THREE.AmbientLight(0xffffff, 0.8);
+        // Lighting
+        const amb = new THREE.AmbientLight(0xffffff, 0.6);
         const dir = new THREE.DirectionalLight(0xffffff, 1.5);
-        dir.position.set(2000, 3000, 2000);
+        dir.position.set(5000, 10000, 5000);
+        dir.castShadow = true;
+        dir.shadow.camera.left = -5000; dir.shadow.camera.right = 5000;
+        dir.shadow.camera.top = 5000; dir.shadow.camera.bottom = -5000;
+        dir.shadow.camera.far = 20000;
         this.scene.add(amb, dir);
 
-        this.terrainManager = new TerrainManager(this.scene);
-
-        // Jet Assembly
-        let dColor = 0x343A40; let dEmissive = 0x000000;
-        if (skin.includes('مدريد')) dColor = 0xffffff;
-        if (skin.includes('برشلونة')) { dColor = 0x000044; dEmissive = 0x330000; }
-
-        this.jet = new THREE.Group();
-        const matMatte = new THREE.MeshStandardMaterial({color: dColor, emissive: dEmissive, roughness: 0.8, metalness: 0.5});
-        
-        const dBody = new THREE.Mesh(new THREE.BoxGeometry(4, 2, 16), matMatte);
-        const dWing = new THREE.Mesh(new THREE.BufferGeometry(), matMatte);
-        const wPts = new Float32Array([0,0,-6, 30,0,10, 0,0,6, 0,0,-6, 0,0,6, -30,0,10]);
-        dWing.geometry.setAttribute('position', new THREE.BufferAttribute(wPts, 3));
-        dWing.geometry.computeVertexNormals();
-        this.jet.add(dBody, dWing);
-        this.jet.position.set(0, 1500, 0);
-
-        // Cockpit Internals
-        this.cockpitGroup = new THREE.Group();
-        this.cockpitGroup.position.set(0, 1, -4);
-        const dash = new THREE.Mesh(new THREE.BoxGeometry(4, 1, 2), new THREE.MeshStandardMaterial({color: 0x111111}));
-        dash.position.set(0, -1, -2);
-        
-        this.radarRing = new THREE.Mesh(new THREE.RingGeometry(0.8, 1, 32), new THREE.MeshBasicMaterial({color: 0x00ff66, side: THREE.DoubleSide}));
-        this.radarRing.position.set(0, 0, -2.5);
-        
-        this.cockpitGroup.add(dash, this.radarRing);
-        this.cameraCockpit.position.set(0, 2, 0);
-        this.cockpitGroup.add(this.cameraCockpit);
-        
-        this.jet.add(this.cockpitGroup);
-        this.scene.add(this.jet);
-
-        // Ground Player
-        this.player = new THREE.Group();
-        const pMat = new THREE.MeshStandardMaterial({color: 0x1a1c1e, roughness: 0.9});
-        const pBody = new THREE.Mesh(new THREE.BoxGeometry(2, 4, 1), pMat); pBody.position.y = 2;
-        const pHead = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), pMat); pHead.position.y = 4.5;
-        this.player.add(pBody, pHead);
-        this.player.visible = false;
-        this.scene.add(this.player);
-
-        // Scenario Setup
-        if (this.level === 1) {
-            for (let i = 0; i < 3; i++) {
-                const e = new THREE.Mesh(new THREE.BoxGeometry(40, 80, 40), new THREE.MeshLambertMaterial({color: 0x440000}));
-                e.position.set((Math.random()-0.5)*3000, 0, -5000 - Math.random()*8000);
-                e.position.y = getTerrainHeight(e.position.x, e.position.z) + 40;
-                this.scene.add(e);
-                this.targets.push({ mesh: e, hp: 100, active: true });
-                
-                const blip = new THREE.Mesh(new THREE.SphereGeometry(0.1), new THREE.MeshBasicMaterial({color: 0xff0000}));
-                this.radarRing.add(blip);
-                this.radarBlips.push(blip);
-            }
-            
-            // Easter Egg
-            const hr = new Date().getHours();
-            if (hr >= 15 && hr < 17) {
-                const prmd = new THREE.Mesh(new THREE.ConeGeometry(80, 180, 4), new THREE.MeshLambertMaterial({color: 0xffdd00, wireframe: true}));
-                prmd.position.set((Math.random()-0.5)*4000, 0, -4000);
-                prmd.position.y = getTerrainHeight(prmd.position.x, prmd.position.z) + 100;
-                this.scene.add(prmd);
-                this.pyramid = prmd;
-            }
-        }
+        this.buildWorld();
+        this.buildHero();
+        this.buildJet();
+        this.buildSpaceTransit();
 
         window.addEventListener('resize', this.onResize);
-        
-        this.terrainManager.update(this.jet.position);
         this.renderer.setAnimationLoop(this.animate);
     }
 
     private onResize = () => {
-        const nw = window.innerWidth; const nh = window.innerHeight;
-        this.renderer.setSize(nw, nh);
-        [this.cameraCockpit, this.cameraChase, this.cameraTop, this.cameraFLIR, this.cameraPlayer].forEach(c => { c.aspect = nw/nh; c.updateProjectionMatrix(); });
+        this.camMain.aspect = window.innerWidth / window.innerHeight;
+        this.camMain.updateProjectionMatrix();
+        this.renderer.setSize(window.innerWidth, window.innerHeight);
     }
 
     public dispose() {
         window.removeEventListener('resize', this.onResize);
+        this.renderer.setAnimationLoop(null);
         this.renderer.dispose();
     }
 
-    public toggleCamera() {
-        if (this.state === 'AIR') {
-            this.camIndex = (this.camIndex + 1) % 4;
-            this.sync();
+    // --- PROCEDURAL GENERATION ---
+    private noise(x: number, z: number) { return Math.sin(x) * Math.cos(z); }
+    private getHeight(x: number, z: number) {
+        return (this.noise(x * 0.001, z * 0.001) * 400) + (Math.sin(x*0.005 + z*0.008)*100);
+    }
+
+    private buildWorld() {
+        const tGeo = new THREE.PlaneGeometry(40000, 40000, 128, 128);
+        tGeo.rotateX(-Math.PI/2);
+        const pos = tGeo.attributes.position;
+        for (let i=0; i<pos.count; i++) pos.setY(i, this.getHeight(pos.getX(i), pos.getZ(i)));
+        tGeo.computeVertexNormals();
+        const tMesh = new THREE.Mesh(tGeo, this.terrainMat);
+        tMesh.receiveShadow = true;
+        this.scene.add(tMesh);
+
+        // Spawn Targets
+        for (let i=0; i<3; i++) {
+            const trg = new THREE.Mesh(new THREE.BoxGeometry(100, 200, 100), new THREE.MeshStandardMaterial({color: 0x111111, emissive: 0x220000}));
+            trg.position.set((Math.random()-0.5)*15000, 0, -10000 - Math.random()*15000);
+            trg.position.y = this.getHeight(trg.position.x, trg.position.z) + 100;
+            trg.castShadow = true;
+            this.scene.add(trg);
+            this.targets.push({ mesh: trg, hp: 100, active: true });
         }
     }
 
-    public triggerDismount() {
-        if (this.state === 'AIR' && this.level === 1) this.state = 'LANDING';
+    private buildSpaceTransit() {
+        const sGeo = new THREE.BufferGeometry();
+        const sPos = new Float32Array(5000 * 3);
+        for(let i=0; i<5000*3; i++) sPos[i] = (Math.random()-0.5)*80000;
+        sGeo.setAttribute('position', new THREE.BufferAttribute(sPos, 3));
+        this.stars = new THREE.Points(sGeo, new THREE.PointsMaterial({color: 0xffffff, size: 40}));
+        
+        this.earth = new THREE.Mesh(new THREE.SphereGeometry(8000, 64, 64), new THREE.MeshStandardMaterial({color: 0x0044bb, emissive: 0x001133, roughness: 0.8}));
+        this.earth.position.set(0, 0, -20000);
+        
+        this.spaceGroup.add(this.stars, this.earth);
+        this.spaceGroup.position.set(0, 40000, 0);
+        this.spaceGroup.visible = false;
+        this.scene.add(this.spaceGroup);
     }
 
-    public triggerBoarding() {
-        if (this.state === 'GROUND') this.state = 'BOARDING';
+    private buildHero() {
+        const gMat = new THREE.MeshStandardMaterial({ color: 0x1A1C20, roughness: 0.9 });
+        const vTex = createHeroVestTexture(this.username);
+        const vestMat = new THREE.MeshStandardMaterial({ map: vTex, roughness: 0.8 });
+        
+        const torso = new THREE.Mesh(new THREE.BoxGeometry(2, 3.5, 1.2), vestMat); torso.position.y = 3; torso.castShadow = true;
+        const head = new THREE.Mesh(new THREE.BoxGeometry(1.2, 1.4, 1.3), new THREE.MeshStandardMaterial({color: 0x111111})); head.position.y = 5.5; head.castShadow = true;
+        const visor = new THREE.Mesh(new THREE.BoxGeometry(1.25, 0.35, 0.2), new THREE.MeshBasicMaterial({color: C_ACCENT})); visor.position.set(0, 5.5, 0.61);
+        
+        this.player.add(torso, head, visor);
+        this.player.visible = false;
+        this.scene.add(this.player);
+    }
+
+    private buildJet() {
+        const cMat = new THREE.MeshStandardMaterial({color: 0x1A1D24, roughness: 0.5, metalness: 0.8});
+        const body = new THREE.Mesh(new THREE.BoxGeometry(5, 3, 24), cMat); body.castShadow = true;
+        
+        const wGeo = new THREE.BufferGeometry();
+        const wPts = new Float32Array([0,0,-8, 45,0,12, 0,0,10, 0,0,-8, 0,0,10, -45,0,12]);
+        wGeo.setAttribute('position', new THREE.BufferAttribute(wPts, 3));
+        wGeo.computeVertexNormals();
+        const wings = new THREE.Mesh(wGeo, cMat); wings.castShadow = true;
+        
+        const cockpit = new THREE.Group();
+        cockpit.position.set(0, 1.5, -6);
+        const dash = new THREE.Mesh(new THREE.BoxGeometry(4.8, 2, 3), new THREE.MeshStandardMaterial({color: 0x050505})); dash.position.set(0,-1,-2);
+        
+        // Active Gyro
+        const gyro = new THREE.Mesh(new THREE.CylinderGeometry(0.8, 0.8, 0.1, 16), new THREE.MeshBasicMaterial({color: C_ACCENT, wireframe: true}));
+        gyro.position.set(-1.5, -0.2, -1.8); gyro.rotation.x = Math.PI/2;
+        gyro.name = 'GYRO';
+        
+        cockpit.add(dash, gyro);
+        this.jet.add(body, wings, cockpit);
+        this.jet.position.set(0, 2000, 0);
+        this.scene.add(this.jet);
+    }
+
+    // --- ACTIONS ---
+    public toggleCamera() {
+        const modes: ('FPS'|'TPS'|'DRONE'|'CINEMATIC')[] = ['TPS', 'FPS', 'DRONE', 'CINEMATIC'];
+        this.camMode = modes[(modes.indexOf(this.camMode) + 1) % modes.length];
+        this.sync();
+    }
+
+    public switchMode() {
+        if (this.state !== 'DEPLOYED') return;
+        if (this.heroMode === 'AIR') {
+            this.heroMode = 'GROUND';
+            this.player.position.copy(this.jet.position).add(new THREE.Vector3(0,0,50));
+            this.airSpeed = 0; this.airPitch = 0; this.airRoll = 0;
+            this.player.visible = true;
+        } else {
+            const dist = this.player.position.distanceTo(this.jet.position);
+            if (dist < 400) { this.heroMode = 'AIR'; this.player.visible = false; }
+        }
+        this.sync();
+    }
+
+    public executeDodge() {
+        if (this.heroMode === 'GROUND' && this.dodgeLife <= 0) {
+            this.dodgeLife = 0.4;
+            this.dodgeDir = this.input.x < 0 ? 1 : -1;
+        }
     }
 
     public fire() {
-        this.shake = 1.0; this.flashFrames = 3;
-        const b = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 15).rotateX(Math.PI/2), new THREE.MeshBasicMaterial({color: 0xffff00}));
-        if (this.state === 'GROUND') {
-            b.position.copy(this.player.position).add(new THREE.Vector3(0, 3, 0));
-            b.quaternion.copy(this.player.quaternion);
-        } else {
-            b.position.copy(this.jet.position);
-            b.quaternion.copy(this.jet.quaternion);
-        }
-        this.missiles.push({ mesh: b, vel: new THREE.Vector3(0, 0, -6000).applyQuaternion(b.quaternion), life: 4.0 });
+        this.shakeMag = 1.0; this.flashFrames = 1;
+        const b = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 1.5, 30).rotateX(Math.PI/2), new THREE.MeshBasicMaterial({color: C_ACCENT}));
+        const src = this.heroMode === 'AIR' ? this.jet : this.player;
+        b.position.copy(src.position).add(new THREE.Vector3(0, this.heroMode==='AIR'?0:4, 0));
+        b.quaternion.copy(src.quaternion);
+        this.projectiles.push({ mesh: b, vel: new THREE.Vector3(0,0,-8000).applyQuaternion(b.quaternion), life: 4.0 });
         this.scene.add(b);
     }
 
-    private initSpace() {
-        this.scene.background = new THREE.Color(0x000000);
-        this.scene.fog = null;
+    private triggerExplosion(pos: THREE.Vector3) {
+        this.shakeMag = 3.0; this.flashFrames = 4;
         
-        const sGeo = new THREE.BufferGeometry();
-        const sArr = new Float32Array(3000);
-        for(let i=0; i<3000; i++) sArr[i] = (Math.random()-0.5)*30000;
-        sGeo.setAttribute('position', new THREE.BufferAttribute(sArr, 3));
-        this.stars = new THREE.Points(sGeo, new THREE.PointsMaterial({color: 0xffffff, size: 20}));
-        this.stars.position.set(0, 15000, 0);
-        this.scene.add(this.stars);
+        // Neon Shockwave
+        const ringGeo = new THREE.RingGeometry(1, 8, 32);
+        const ringMat = new THREE.MeshBasicMaterial({color: C_DANGER, transparent: true, side: THREE.DoubleSide, blending: THREE.AdditiveBlending});
+        const ring = new THREE.Mesh(ringGeo, ringMat);
+        ring.position.copy(pos);
+        this.scene.add(ring);
 
-        this.earth = new THREE.Mesh(new THREE.SphereGeometry(2000, 32, 32), new THREE.MeshLambertMaterial({color: 0x0055ff, emissive: 0x001133}));
-        this.earth.position.set(0, 15000, -4000);
-        this.scene.add(this.earth);
+        // Glowing Fragments
+        const pGeo = new THREE.BufferGeometry();
+        const pArr = new Float32Array(800 * 3); const cArr = new Float32Array(800 * 3); const vels = [];
+        const c1 = new THREE.Color(C_DANGER); const c2 = new THREE.Color(C_ACCENT);
+        for(let i=0; i<800; i++) {
+            pArr[i*3]=pos.x; pArr[i*3+1]=pos.y; pArr[i*3+2]=pos.z;
+            vels.push(new THREE.Vector3((Math.random()-0.5)*2, (Math.random()*2), (Math.random()-0.5)*2).normalize().multiplyScalar(600+Math.random()*800));
+            const c = Math.random()>0.5 ? c1 : c2;
+            cArr[i*3]=c.r; cArr[i*3+1]=c.g; cArr[i*3+2]=c.b;
+        }
+        pGeo.setAttribute('position', new THREE.BufferAttribute(pArr, 3));
+        pGeo.setAttribute('color', new THREE.BufferAttribute(cArr, 3));
+        const parts = new THREE.Points(pGeo, new THREE.PointsMaterial({size: 30, vertexColors: true, transparent: true, blending: THREE.AdditiveBlending}));
+        this.scene.add(parts);
+
+        this.explosions.push({ring, parts, life: 2.0, vels});
+        this.sync();
     }
 
     private sync() {
         if (!this.onSync) return;
-        let tHit = 0; let tTot = this.targets.length;
-        this.targets.forEach(t => { if (!t.active) tHit++; });
-        
-        if (tHit === tTot && tTot > 0 && this.state !== 'CINEMATIC') {
-            this.state = 'CINEMATIC';
-            this.activeCamera = this.cameraChase;
-        }
-
-        const camNames = ['COCKPIT_INTERNAL', 'EXTERIOR_CHASE', 'TOP_DOWN_VIEW', 'MILITARY_DRONE_FLIR'];
-        this.onSync({ 
-            camIndex: this.camIndex, camName: camNames[this.camIndex], 
-            progress: Math.floor((tHit/tTot)*100)||0, godMode: this.godMode, state: this.state 
+        const activeTargets = this.targets.filter(t => t.active).length;
+        this.onSync({
+            progress: Math.floor(((3-activeTargets)/3)*100),
+            camMode: this.camMode,
+            heroMode: this.heroMode,
+            state: this.state,
+            alt: this.heroMode === 'AIR' ? this.jet.position.y : this.player.position.y
         });
-    }
 
-    private spawnExplosion(pos: THREE.Vector3) {
-        this.shake = 2.0; this.flashFrames = 5;
-        const g = new THREE.BufferGeometry(); const pts = new Float32Array(600); const vels = [];
-        for(let i=0; i<600; i+=3) {
-            pts[i]=pos.x; pts[i+1]=pos.y; pts[i+2]=pos.z;
-            vels.push(new THREE.Vector3((Math.random()-0.5)*2, Math.random(), (Math.random()-0.5)*2).normalize().multiplyScalar(1000+Math.random()*1000));
+        if (activeTargets === 0 && this.state === 'DEPLOYED') {
+            this.state = 'SPACE_TRANSITION';
+            this.camMode = 'CINEMATIC';
+            this.heroMode = 'AIR';
+            this.player.visible = false;
+            this.spaceGroup.visible = true;
+            this.scene.fog = null;
         }
-        g.setAttribute('position', new THREE.BufferAttribute(pts, 3));
-        const ptsMesh = new THREE.Points(g, new THREE.PointsMaterial({color: 0xffaa00, size: 40, transparent: true}));
-        this.scene.add(ptsMesh);
-        this.explosions.push({mesh: ptsMesh, life: 1.5, vels});
-        this.sync();
     }
 
+    // --- MAIN LOOP ---
     private animate = () => {
         const dt = Math.min(this.clock.getDelta(), 0.1);
-        
-        // Target Radar Updates
-        this.targets.forEach((t, i) => {
-            if (t.active && this.radarBlips[i]) {
-                const dir = t.mesh.position.clone().sub(this.jet.position).normalize();
-                const lDir = dir.applyQuaternion(this.jet.quaternion.clone().invert());
-                this.radarBlips[i].position.set(lDir.x * 0.8, -lDir.z * 0.8, 0); 
-                this.radarBlips[i].visible = true;
-            } else if (this.radarBlips[i]) {
-                this.radarBlips[i].visible = false;
-            }
-        });
 
-        // Easter Egg
-        if (this.pyramid) {
-            this.pyramid.rotation.y += 2*dt;
-            const dist = this.state === 'GROUND' ? this.player.position.distanceTo(this.pyramid.position) : this.jet.position.distanceTo(this.pyramid.position);
-            if (dist < 200) {
-                this.godMode = true; this.scene.remove(this.pyramid); this.pyramid = undefined;
-                this.flashFrames = 20; if(this.onGodModeTrigger) this.onGodModeTrigger(); this.sync();
-            }
-        }
+        // 1. PHYSICS ENFORCEMENT & INTERPOLATION
+        if (this.state === 'DEPLOYED') {
+            if (this.heroMode === 'AIR') {
+                // Aerospace Dynamics
+                if (this.input.x === 0) this.airRoll = THREE.MathUtils.lerp(this.airRoll, 0, 0.1);
+                else { this.airRoll += this.input.x * dt * 2.5; this.airRoll = THREE.MathUtils.clamp(this.airRoll, -Math.PI/2.5, Math.PI/2.5); }
+                
+                if (this.input.y === 0) this.airPitch = THREE.MathUtils.lerp(this.airPitch, 0, 0.1);
+                else { this.airPitch += this.input.y * dt * 2.5; this.airPitch = THREE.MathUtils.clamp(this.airPitch, -Math.PI/3, Math.PI/3); }
 
-        // State Machine
-        if (this.state === 'AIR') {
-            this.player.visible = false;
-            this.jet.translateZ(-1500 * dt);
-            this.jet.rotation.x = this.input.y * 1.5; 
-            this.jet.rotation.z = -this.input.x * 1.5; 
-            this.jet.rotation.y -= this.input.x * 1.5 * dt; 
-            
-            const minH = getTerrainHeight(this.jet.position.x, this.jet.position.z) + 100;
-            if (this.jet.position.y < minH) this.jet.position.y = minH;
-            this.terrainManager.update(this.jet.position);
-            
-            if (this.camIndex === 0) {
-                this.activeCamera = this.cameraCockpit;
-            } else if (this.camIndex === 1) {
-                this.activeCamera = this.cameraChase;
-                this.cameraChase.position.copy(this.jet.position).add(new THREE.Vector3(0, 50, 200).applyQuaternion(this.jet.quaternion));
-                this.cameraChase.lookAt(this.jet.position);
-            } else if (this.camIndex === 2) {
-                this.activeCamera = this.cameraTop;
-                this.cameraTop.position.copy(this.jet.position).add(new THREE.Vector3(0, 1500, 0));
-                this.cameraTop.lookAt(this.jet.position);
+                this.airSpeed = THREE.MathUtils.lerp(this.airSpeed, this.throttleActive ? this.maxAirSpeed : 600, 0.05);
+
+                this.jet.rotation.x = this.airPitch;
+                this.jet.rotation.z = -this.airRoll;
+                this.jet.rotation.y -= this.airRoll * dt * 1.2;
+                this.jet.translateZ(-this.airSpeed * dt);
+
+                const minH = this.getHeight(this.jet.position.x, this.jet.position.z) + 150;
+                if (this.jet.position.y < minH) { this.jet.position.y = THREE.MathUtils.lerp(this.jet.position.y, minH, 0.1); this.airPitch = Math.max(0, this.airPitch); }
+
+                // Update Cockpit Instruments
+                const gyro = this.jet.getObjectByName('GYRO');
+                if (gyro) { gyro.rotation.z = -this.airRoll; gyro.rotation.x = Math.PI/2 + this.airPitch; }
+
             } else {
-                this.activeCamera = this.cameraFLIR;
-                this.cameraFLIR.position.copy(this.jet.position).add(new THREE.Vector3(0, -20, -50));
-                this.cameraFLIR.rotation.copy(this.jet.rotation);
-                this.cameraFLIR.rotateX(-0.1);
+                // Ground Tactical
+                const tarScaleY = this.input.crouch ? 0.5 : 1.0;
+                this.player.scale.y = THREE.MathUtils.lerp(this.player.scale.y, tarScaleY, dt * 10);
+                
+                if (this.dodgeLife > 0) {
+                    this.dodgeLife -= dt;
+                    this.player.translateX(this.dodgeDir * 1200 * dt);
+                } else {
+                    const tarSpeed = this.input.crouch ? 80 : (this.input.sprint ? 400 : 180);
+                    this.groundSpeed = THREE.MathUtils.lerp(this.groundSpeed, this.input.y !== 0 ? tarSpeed : 0, 0.2);
+                    this.player.rotation.y -= this.input.x * 3.5 * dt;
+                    this.player.translateZ(this.input.y > 0 ? this.groundSpeed * dt : -this.groundSpeed * dt);
+                }
+                
+                this.player.position.y = this.getHeight(this.player.position.x, this.player.position.z);
             }
-
-        } else if (this.state === 'LANDING') {
-            this.activeCamera = this.cameraChase;
-            this.cameraChase.position.copy(this.jet.position).add(new THREE.Vector3(0, 50, 200));
-            this.cameraChase.lookAt(this.jet.position);
-            
-            const gY = getTerrainHeight(this.jet.position.x, this.jet.position.z) + 15;
-            this.jet.position.y += (gY - this.jet.position.y) * 2 * dt;
-            this.jet.rotation.x *= 0.9; this.jet.rotation.z *= 0.9;
-            if (Math.abs(this.jet.position.y - gY) < 2) {
-                this.state = 'GROUND';
-                this.player.position.copy(this.jet.position);
-                this.player.position.z -= 40;
-                this.player.visible = true;
-                this.sync();
-            }
-        } else if (this.state === 'BOARDING') {
-            this.activeCamera = this.cameraChase;
-            const tDir = this.jet.position.clone().sub(this.player.position);
-            tDir.y = 0;
-            if (tDir.length() < 10) {
-                this.state = 'AIR';
-                this.sync();
-            } else {
-                tDir.normalize();
-                this.player.position.addScaledVector(tDir, 100 * dt);
-                this.player.position.y = getTerrainHeight(this.player.position.x, this.player.position.z);
-                this.cameraChase.position.copy(this.player.position).add(new THREE.Vector3(0, 20, 50));
-                this.cameraChase.lookAt(this.player.position);
-            }
-        } else if (this.state === 'GROUND') {
-            const spd = this.crouching ? 40 : (this.sprinting ? 200 : 80);
-            this.player.rotation.y -= this.input.x * 2.5 * dt;
-            this.player.translateZ(this.input.y * spd * dt); 
-            this.player.position.y = getTerrainHeight(this.player.position.x, this.player.position.z);
-            
-            this.activeCamera = this.cameraPlayer;
-            const off = new THREE.Vector3(0, this.crouching ? 3 : 6, 25).applyQuaternion(this.player.quaternion);
-            this.cameraPlayer.position.copy(this.player.position).add(off);
-            this.cameraPlayer.lookAt(this.player.position);
-            this.terrainManager.update(this.player.position);
-        } else if (this.state === 'CINEMATIC') {
+        } else if (this.state === 'SPACE_TRANSITION') {
             this.cinematicTime += dt;
-            if (this.cinematicTime < 4) {
-                this.jet.rotation.x += (Math.PI/2 - this.jet.rotation.x) * dt; 
-                this.jet.position.y += 2500 * dt;
-                this.jet.position.z -= 1000 * dt;
-                this.cameraChase.position.copy(this.jet.position).add(new THREE.Vector3(0, -50, 300).applyQuaternion(this.jet.quaternion));
-                this.cameraChase.lookAt(this.jet.position);
-            } else {
-                if (!this.spaceInit) { this.initSpace(); this.spaceInit = true; this.cinematicTime = 4; }
-                const oT = (this.cinematicTime - 4) * 0.4;
-                this.jet.position.x = this.earth!.position.x + Math.sin(oT) * 3000;
-                this.jet.position.z = this.earth!.position.z + Math.cos(oT) * 3000;
-                this.jet.position.y = 15000;
+            this.airPitch = THREE.MathUtils.lerp(this.airPitch, Math.PI/3.5, dt * 1.5);
+            this.airSpeed = THREE.MathUtils.lerp(this.airSpeed, 12000, dt);
+            
+            this.jet.rotation.x = this.airPitch;
+            this.jet.rotation.z = 0;
+            this.jet.translateZ(-this.airSpeed * dt);
+            
+            if (this.cinematicTime > 4) {
+                const orbT = (this.cinematicTime - 4) * 0.3;
+                this.scene.background = new THREE.Color(0x010204);
+                this.jet.position.x = this.earth!.position.x + Math.sin(orbT)*12000;
+                this.jet.position.z = this.earth!.position.z + Math.cos(orbT)*12000;
+                this.jet.position.y = 40000;
                 this.jet.lookAt(this.earth!.position);
                 this.jet.rotateY(Math.PI/2);
                 
-                this.cameraChase.position.copy(this.jet.position).add(new THREE.Vector3(500, 200, 500));
-                this.cameraChase.lookAt(this.jet.position);
-
-                if (oT > Math.PI * 2.5 && this.onVictory) {
-                    this.onVictory(this.score);
-                    this.onVictory = undefined;
+                if (orbT > Math.PI * 2 && this.onVictory) { 
+                    this.state = 'VICTORY'; this.onVictory(); this.onVictory = undefined; 
                 }
             }
         }
 
-        // Projectiles
-        for (let i=this.missiles.length-1; i>=0; i--) {
-            let m = this.missiles[i];
-            m.life -= dt; m.mesh.position.addScaledVector(m.vel, dt);
+        // 2. PROJECTILES & COLLISIONS
+        for (let i=this.projectiles.length-1; i>=0; i--) {
+            let p = this.projectiles[i]; p.life -= dt;
+            p.mesh.position.addScaledVector(p.vel, dt);
             let hit = false;
-
-            if (this.pyramid && m.mesh.position.distanceTo(this.pyramid.position) < 200) {
-                this.godMode = true; this.scene.remove(this.pyramid); this.pyramid = undefined;
-                this.flashFrames = 20; if(this.onGodModeTrigger) this.onGodModeTrigger(); this.sync();
-            }
-
-            if (this.state !== 'CINEMATIC' && m.mesh.position.y < getTerrainHeight(m.mesh.position.x, m.mesh.position.z)) hit = true;
+            
+            if (p.mesh.position.y < this.getHeight(p.mesh.position.x, p.mesh.position.z)) hit = true;
             
             if (!hit) {
                 for (let j=0; j<this.targets.length; j++) {
                     let tr = this.targets[j];
-                    if (tr.active && tr.mesh.position.distanceTo(m.mesh.position) < 150) {
-                        tr.hp -= this.godMode ? 99999 : 50; hit = true;
-                        if (tr.hp <= 0) { 
-                            tr.active = false; tr.mesh.visible = false; 
-                            this.spawnExplosion(tr.mesh.position); 
-                            this.score += 1000;
-                        }
-                        break;
+                    if (tr.active && tr.mesh.position.distanceTo(p.mesh.position) < 150) {
+                        tr.hp -= 50; hit = true;
+                        if (tr.hp <= 0) { tr.active = false; tr.mesh.visible = false; this.triggerExplosion(tr.mesh.position); }
                     }
                 }
             }
-            if(hit || m.life<=0) { this.scene.remove(m.mesh); this.missiles.splice(i,1); if(hit) this.spawnExplosion(m.mesh.position);}
+            if (hit || p.life<=0) { this.scene.remove(p.mesh); this.projectiles.splice(i,1); }
         }
 
-        // Explosions
+        // 3. VFX
         for (let i=this.explosions.length-1; i>=0; i--) {
             let ex = this.explosions[i]; ex.life -= dt;
-            const pArr = ex.mesh.geometry.attributes.position.array as Float32Array;
-            for(let j=0; j<ex.vels.length; j++) {
-                pArr[j*3] += ex.vels[j].x*dt; pArr[j*3+1] += ex.vels[j].y*dt; pArr[j*3+2] += ex.vels[j].z*dt;
-            }
-            ex.mesh.geometry.attributes.position.needsUpdate = true;
-            (ex.mesh.material as THREE.PointsMaterial).opacity = ex.life;
-            if(ex.life<=0) { this.scene.remove(ex.mesh); this.explosions.splice(i,1); }
+            const pRatio = 1.0 - (ex.life / 2.0);
+            
+            ex.ring.scale.setScalar(1.0 + pRatio * 60);
+            ex.ring.lookAt(this.camMain.position);
+            (ex.ring.material as THREE.MeshBasicMaterial).opacity = Math.max(0, ex.life/2);
+            
+            const arr = ex.parts.geometry.attributes.position.array as Float32Array;
+            for(let j=0; j<ex.vels.length; j++) { arr[j*3] += ex.vels[j].x*dt; arr[j*3+1] += ex.vels[j].y*dt; arr[j*3+2] += ex.vels[j].z*dt; }
+            ex.parts.geometry.attributes.position.needsUpdate = true;
+            (ex.parts.material as THREE.PointsMaterial).opacity = Math.max(0, ex.life/2);
+            
+            if (ex.life<=0) { this.scene.remove(ex.ring, ex.parts); this.explosions.splice(i,1); }
         }
 
-        let sx = 0; let sy = 0;
-        if (this.shake > 0) {
-            this.shake -= dt*5; if(this.shake < 0) this.shake = 0;
-            sx = (Math.random()-0.5)*30*this.shake; sy = (Math.random()-0.5)*30*this.shake;
-            this.activeCamera.position.x += sx; this.activeCamera.position.y += sy;
+        // 4. CAMERA MATRIX
+        const activeEntity = this.heroMode === 'AIR' ? this.jet : this.player;
+        if (this.camMode === 'TPS' || this.state === 'SPACE_TRANSITION') {
+            const offset = this.heroMode === 'AIR' ? new THREE.Vector3(0, 80, 400).applyQuaternion(this.jet.quaternion) : new THREE.Vector3(0, 15, 60).applyQuaternion(this.player.quaternion);
+            this.camMain.position.lerp(activeEntity.position.clone().add(offset), 0.1);
+            this.camMain.lookAt(activeEntity.position);
+        } else if (this.camMode === 'FPS') {
+            const offset = this.heroMode === 'AIR' ? new THREE.Vector3(0, 2, -5).applyMatrix4(this.jet.matrixWorld) : new THREE.Vector3(0, 5, 0).applyMatrix4(this.player.matrixWorld);
+            this.camMain.position.copy(offset);
+            this.camMain.quaternion.copy(activeEntity.quaternion);
+        } else if (this.camMode === 'DRONE') {
+            this.camMain.position.copy(activeEntity.position).add(new THREE.Vector3(0, 2500, 0));
+            this.camMain.lookAt(activeEntity.position);
+        } else if (this.camMode === 'CINEMATIC') {
+            const offset = new THREE.Vector3(600, 200, 600);
+            this.camMain.position.lerp(activeEntity.position.clone().add(offset), 0.05);
+            this.camMain.lookAt(activeEntity.position);
         }
 
-        // FLIR and Strobe Overrides
-        if (this.flashFrames > 0) {
-            this.scene.background = new THREE.Color(this.flashFrames % 2 === 0 ? 0xffffff : 0xaa0000);
-            this.scene.overrideMaterial = null;
-            this.flashFrames--;
-        } else if (this.camIndex === 3 && this.state === 'AIR') {
-            this.scene.background = new THREE.Color(0x111111);
-            this.scene.overrideMaterial = new THREE.MeshBasicMaterial({color: 0xcccccc});
-            this.scene.fog = null;
-        } else {
-            this.scene.background = this.spaceInit ? new THREE.Color(0x000000) : new THREE.Color(0x87CEEB);
-            this.scene.overrideMaterial = null;
-            this.scene.fog = this.spaceInit ? null : new THREE.FogExp2(0x87CEEB, 0.0002);
+        // Screen Shakes & Overrides
+        let sx=0, sy=0;
+        if (this.shakeMag > 0) {
+            this.shakeMag -= dt*4; if(this.shakeMag<0) this.shakeMag=0;
+            sx = (Math.random()-0.5)*50*this.shakeMag; sy = (Math.random()-0.5)*50*this.shakeMag;
+            this.camMain.position.x += sx; this.camMain.position.y += sy;
         }
 
-        this.renderer.render(this.scene, this.activeCamera);
-        
-        if (this.shake > 0) { this.activeCamera.position.x -= sx; this.activeCamera.position.y -= sy; }
-    };
+        if (this.flashFrames > 0) { this.scene.background = new THREE.Color(0xFFFFFF); this.flashFrames--; }
+        else if (this.camMode === 'DRONE') this.scene.background = new THREE.Color(0x05080A);
+        else this.scene.background = this.state === 'SPACE_TRANSITION' ? new THREE.Color(0x010204) : new THREE.Color(0x87CEEB);
+
+        this.renderer.render(this.scene, this.camMain);
+        if (this.shakeMag > 0) { this.camMain.position.x -= sx; this.camMain.position.y -= sy; }
+    }
 }
 
-// --- CONTROLS ---
-function Joystick({ onMove }: { onMove: (x:number, y:number)=>void }) {
-    const base = useRef<HTMLDivElement>(null); const stick = useRef<HTMLDivElement>(null);
-    const hM = (e: React.PointerEvent) => {
-        if(e.buttons===0 || !base.current || !stick.current) return;
-        const r = base.current.getBoundingClientRect();
-        let dx = e.clientX - (r.left + r.width/2); let dy = e.clientY - (r.top + r.height/2);
-        const rad = r.width/2; const d = Math.min(Math.hypot(dx,dy), rad); const a = Math.atan2(dy,dx);
-        dx = Math.cos(a)*d; dy = Math.sin(a)*d;
-        stick.current.style.transform = `translate(${dx}px, ${dy}px)`;
-        onMove(dx/rad, dy/rad);
-    };
-    const hU = () => { if(stick.current) stick.current.style.transform = `translate(0,0)`; onMove(0,0); };
-    return (
-        <div ref={base} className="w-32 h-32 rounded-full border-2 bg-black/60 touch-none flex items-center justify-center pointer-events-auto" style={{borderColor: C_BORDER}}
-            onPointerDown={hM} onPointerMove={hM} onPointerUp={hU} onPointerLeave={hU}>
-            <div ref={stick} className="w-10 h-10 rounded-full border-2 bg-white/40 transition-transform duration-75 shadow-[0_0_15px_#00FF66]" style={{borderColor: C_TEXT}} />
-        </div>
-    );
-}
+// ============================================================================
+// REACT UI ARCHITECTURE (AAA DESIGN)
+// ============================================================================
 
-// --- APP COMPONENT ---
 export default function App() {
-    const [orientWarning, setOrientWarning] = useState(false);
+    const { profile, setProfile, getRank } = useSGMProfile();
+    const rankData = getRank(profile.xp);
+    
+    const [view, setView] = useState<'MAIN' | 'PROFILE' | 'GARAGE' | 'SETTINGS' | 'GAME' | 'VICTORY'>('MAIN');
+    const [audioPlay, setAudioPlay] = useState(false);
+    const audioRef = useRef<HTMLAudioElement | null>(null);
+
+    // Initial Audio Setup
     useEffect(() => {
-        const chk = () => setOrientWarning(window.innerHeight > window.innerWidth);
-        chk(); window.addEventListener('resize', chk);
-        return () => window.removeEventListener('resize', chk);
+        if (!audioRef.current && typeof window !== 'undefined') {
+            audioRef.current = new Audio('./audio/battle_hype.mp3');
+            audioRef.current.loop = true;
+        }
     }, []);
 
-    const [state, setState] = useState<'MAP' | 'GAME' | 'VICTORY'>('MAP');
-    const [tab, setTab] = useState<'OPS' | 'HANGAR' | 'LAN'>('OPS');
-    const [save, setSave] = useSaveData();
-    const [selLvl, setSelLvl] = useState(1);
-    
-    // Audio 
-    const [audio] = useState(() => typeof window !== 'undefined' ? new Audio('./audio/battle_hype.mp3') : null);
-    const [audioPlay, setAudioPlay] = useState(false);
     useEffect(() => {
-        if(!audio) return;
-        audio.loop = true;
-        if(audioPlay) audio.play().catch(()=>{}); else audio.pause();
-    }, [audioPlay, audio]);
+        if (audioRef.current) {
+            if (audioPlay) audioRef.current.play().catch(()=>{});
+            else audioRef.current.pause();
+        }
+    }, [audioPlay]);
 
+    // Engine Bridge
     const canvasRef = useRef<HTMLCanvasElement>(null);
-    const engineRef = useRef<TacticalSim | null>(null);
-    const [hud, setHud] = useState<any>({ camIndex: 0, camName: 'COCKPIT_INTERNAL', progress: 0, godMode: false, state: 'AIR' });
-    const [godMsg, setGodMsg] = useState(false);
-    
-    const LEVELS = [
-        { id: 1, n: 'الغارة الجبلية النهارية' },
-        { id: 2, n: 'القطاع البحري: المدمرات' },
-        { id: 3, n: 'خطوط الإمداد العسكرية' }
-    ];
-
-    const MOCK_LAN = useMemo(() => {
-        let players = [
-            { name: "صقر_شرعب", score: 14500 },
-            { name: "النمر_التكتيكي", score: 12200 },
-            { name: "حنرال_المدمره", score: 9800 },
-            { name: "أنت (محلي)", score: save.highScore }
-        ];
-        return players.sort((a,b) => b.score - a.score);
-    }, [save.highScore]);
+    const engineRef = useRef<TacticalEngine | null>(null);
+    const [hud, setHud] = useState({ progress: 0, camMode: 'TPS', heroMode: 'AIR', state: 'DEPLOYED', alt: 0 });
 
     useEffect(() => {
-        if (state === 'GAME' && canvasRef.current && !engineRef.current) {
-            engineRef.current = new TacticalSim(canvasRef.current, selLvl, save.activeSkin);
+        if (view === 'GAME' && canvasRef.current && !engineRef.current) {
+            engineRef.current = new TacticalEngine(canvasRef.current, profile.username);
             engineRef.current.onSync = (d) => setHud(h => ({...h, ...d}));
-            engineRef.current.onGodModeTrigger = () => { setGodMsg(true); setTimeout(()=>setGodMsg(false), 4000); };
-            engineRef.current.onVictory = (score) => {
-                setSave(s => ({...s, highScore: Math.max(s.highScore, score), unlockedLevel: Math.max(s.unlockedLevel, selLvl+1), credits: s.credits + 500 }));
-                setState('VICTORY');
+            engineRef.current.onVictory = () => {
+                setProfile(p => ({...p, xp: p.xp + 5000}));
+                setView('VICTORY');
             };
         }
-        return () => { if (state !== 'GAME' && engineRef.current) { engineRef.current.dispose(); engineRef.current = null; } }
-    }, [state, selLvl, save.activeSkin, setSave]);
+        return () => { if (view !== 'GAME' && engineRef.current) { engineRef.current.dispose(); engineRef.current = null; } }
+    }, [view, profile.username, setProfile]);
 
-    if (orientWarning) {
+    const sBtn = `px-8 py-4 bg-[${C_PANEL}] hover:bg-[${C_PANEL_HOVER}] border border-[${C_BORDER_DIM}] hover:border-[${C_ACCENT}] text-white font-black tracking-widest uppercase transition-all flex items-center justify-between group`;
+    const sCard = `p-8 bg-[${C_PANEL}]/90 border border-[${C_BORDER_DIM}] backdrop-blur-xl shadow-2xl`;
+
+    const ActivationModal = () => {
+        const [code, setCode] = useState('');
+        const [user, setUser] = useState('');
+        const [err, setErr] = useState('');
+        
+        const submit = () => {
+            if (!VALID_CODES.includes(code)) { setErr('Invalid Activation Code. Verification Failed.'); return; }
+            if (profile.usedCodes.includes(code)) { setErr('Code already registered to a military profile.'); return; }
+            if (user.length < 3) { setErr('Operator designation must be at least 3 characters.'); return; }
+            setProfile(p => ({ ...p, username: user, usedCodes: [...p.usedCodes, code] }));
+            setView('MAIN');
+        };
+
         return (
-            <div className="fixed inset-0 z-[9999] flex flex-col items-center justify-center p-8 text-center" style={{background: '#0a0a0a', direction: 'rtl'}}>
-                <div className="w-20 h-20 border-8 border-red-600 border-t-transparent rounded-full animate-spin mb-8" />
-                <h1 className="text-4xl font-black text-red-600 tracking-widest leading-loose drop-shadow-[0_0_15px_#ff0000]">
-                    تنبيه أمني: يرجى تدوير الشاشة للوضع الأفقي للتشغيل
-                </h1>
+            <div className={`fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md`}>
+                <div className={`${sCard} w-full max-w-xl flex flex-col gap-6`}>
+                    <h2 className={`text-3xl font-black text-[${C_ACCENT}] uppercase tracking-widest border-b border-[${C_BORDER_DIM}] pb-4`}>Classified Clearance Authorization</h2>
+                    {err && <div className={`p-4 bg-[${C_DANGER}]/20 border border-[${C_DANGER}] text-[${C_DANGER}] font-bold`}>{err}</div>}
+                    <div className="flex flex-col gap-2">
+                        <label className={`text-xs text-[${C_TEXT_DIM}] font-bold uppercase`}>Enter Activation Cipher</label>
+                        <input value={code} onChange={e=>setCode(e.target.value)} className={`w-full bg-black border border-[${C_BORDER_DIM}] px-4 py-3 text-white outline-none focus:border-[${C_ACCENT}]`} placeholder="SGM-XXXX-XXX" />
+                    </div>
+                    <div className="flex flex-col gap-2">
+                        <label className={`text-xs text-[${C_TEXT_DIM}] font-bold uppercase`}>New Operator Designation</label>
+                        <input value={user} onChange={e=>setUser(e.target.value)} className={`w-full bg-black border border-[${C_BORDER_DIM}] px-4 py-3 text-white outline-none focus:border-[${C_ACCENT}]`} placeholder="Callsign" />
+                    </div>
+                    <div className="flex gap-4 mt-4">
+                        <button onClick={submit} className={`flex-1 py-4 bg-[${C_ACCENT}]/10 border border-[${C_ACCENT}] text-[${C_ACCENT}] font-black hover:bg-[${C_ACCENT}] hover:text-black transition-colors uppercase`}>Authorize & Overwrite</button>
+                        <button onClick={()=>setView('MAIN')} className={`px-8 border border-[${C_BORDER_DIM}] text-white hover:bg-white/10 uppercase font-black`}>Abort</button>
+                    </div>
+                </div>
             </div>
         );
-    }
+    };
 
     return (
-        <div className="fixed inset-0 overflow-hidden font-mono select-none" dir="rtl" style={{backgroundColor: C_BG, color: C_TEXT, touchAction: 'none'}}>
-            <style>
-            {`
-                @keyframes crt-scanlines { 0% { background-position: 0 0; } 100% { background-position: 0 4px; } }
-                .scanline-overlay { animation: crt-scanlines 0.2s linear infinite; }
-            `}
-            </style>
+        <div className="fixed inset-0 select-none overflow-hidden" style={{ backgroundColor: C_BG, color: C_TEXT, fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+            <style>{`
+                .vignette { box-shadow: inset 0 0 200px rgba(0,0,0,0.9); pointer-events: none; }
+                .glow-text { text-shadow: 0 0 10px ${C_ACCENT}; }
+                .glow-border { box-shadow: 0 0 15px ${C_ACCENT}40; border-color: ${C_ACCENT}; }
+                .tactical-mask { clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px); }
+            `}</style>
+            
+            <div className="absolute inset-0 z-[900] vignette" />
 
-            <div className="absolute inset-0 pointer-events-none z-[900] scanline-overlay" style={scanlineStyles} />
+            {/* --- GLOBAL AUDIO TOGGLE --- */}
+            <div className="fixed top-8 right-8 z-[1000]">
+                <button onClick={() => setAudioPlay(!audioPlay)} className={`p-4 bg-[${C_PANEL}]/80 backdrop-blur-md border border-[${C_BORDER_DIM}] ${audioPlay ? `text-[${C_ACCENT}] border-[${C_ACCENT}]` : 'text-white'}`}>
+                    <IconMusic />
+                </button>
+            </div>
 
-            {state === 'MAP' && (
-                <div className="absolute inset-0 flex flex-col p-6 z-10" style={{backgroundColor: C_BG}}>
-                    <div className="flex justify-between items-end mb-8 border-b pb-4" style={{borderColor: C_BORDER}}>
-                        <div>
-                            <h1 className="text-3xl font-black tracking-widest uppercase mb-2 text-white">القيادة الإستراتيجية العليا</h1>
-                            <div className="flex gap-4 pointer-events-auto">
-                                <button onClick={()=>setTab('OPS')} className={`px-4 py-2 border font-bold ${tab==='OPS'?'bg-white/10 text-white':''}`} style={{borderColor: C_BORDER}}>العمليات التكتيكية</button>
-                                <button onClick={()=>setTab('HANGAR')} className={`px-4 py-2 border font-bold ${tab==='HANGAR'?'bg-white/10 text-white':''}`} style={{borderColor: C_BORDER}}>المستودع والدروع</button>
-                                <button onClick={()=>setTab('LAN')} className={`px-4 py-2 border font-bold ${tab==='LAN'?'bg-white/10 text-white':''}`} style={{borderColor: C_BORDER}}>بطولة الحارة (Ping: 0ms)</button>
+            {/* ==================== MENUS ==================== */}
+            {view !== 'GAME' && view !== 'VICTORY' && (
+                <div className="absolute inset-0 flex flex-col bg-[url('https://images.unsplash.com/photo-1508138221679-760a23a2285b?q=80&w=2574&auto=format&fit=crop')] bg-cover bg-center">
+                    <div className="absolute inset-0 bg-black/80 backdrop-blur-2xl" />
+                    
+                    <div className="relative z-10 flex flex-col h-full p-16 max-w-7xl mx-auto w-full">
+                        {/* Header */}
+                        <div className="flex justify-between items-end border-b border-white/10 pb-8 mb-12">
+                            <div>
+                                <h1 className={`text-6xl font-black tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-white to-[${C_TEXT_DIM}] uppercase`}>
+                                    تنكيل-SGMW
+                                </h1>
+                                <p className={`mt-2 text-xl font-bold text-[${C_ACCENT}] tracking-[0.2em] uppercase`}>Advanced Military Simulator Platform</p>
+                            </div>
+                            <div className="text-right">
+                                <div className="text-2xl font-black uppercase text-white">{profile.username}</div>
+                                <div className={`text-sm font-bold text-[${C_TEXT_DIM}] uppercase tracking-widest`}>{rankData.currentRank.name}</div>
+                            </div>
+                        </div>
+
+                        {/* Routes */}
+                        <div className="flex-1 flex gap-12">
+                            {/* Navigation Sidebar */}
+                            <div className="w-96 flex flex-col gap-4">
+                                <button onClick={()=>setView('GAME')} className={sBtn}>
+                                    <span>Deploy Simulation</span>
+                                    <div className={`w-8 h-8 text-[${C_ACCENT}]`}><IconPlay /></div>
+                                </button>
+                                <button onClick={()=>setView('PROFILE')} className={`${sBtn} ${view==='PROFILE'?`border-[${C_ACCENT}] text-[${C_ACCENT}]`:''}`}>
+                                    <span>Operator Profile</span>
+                                    <div className="w-6 h-6"><IconUser /></div>
+                                </button>
+                                <button onClick={()=>setView('GARAGE')} className={`${sBtn} ${view==='GARAGE'?`border-[${C_ACCENT}] text-[${C_ACCENT}]`:''}`}>
+                                    <span>Vehicle Hangar</span>
+                                    <div className="w-6 h-6"><IconShield /></div>
+                                </button>
+                                <button onClick={()=>setView('SETTINGS')} className={`${sBtn} ${view==='SETTINGS'?`border-[${C_ACCENT}] text-[${C_ACCENT}]`:''}`}>
+                                    <span>System Config</span>
+                                    <div className="w-6 h-6"><IconSettings /></div>
+                                </button>
+                            </div>
+
+                            {/* Content Area */}
+                            <div className="flex-1 relative">
+                                {view === 'PROFILE' && (
+                                    <div className={`${sCard} h-full animate-fade-in`}>
+                                        <h2 className="text-3xl font-black uppercase tracking-widest mb-8 border-l-4 border-[#00FF66] pl-4">Service Record</h2>
+                                        
+                                        <div className="mb-12">
+                                            <div className="flex justify-between items-end mb-4">
+                                                <div className="text-2xl font-black uppercase">{rankData.currentRank.name}</div>
+                                                <div className={`text-lg font-bold text-[${C_ACCENT}]`}>{profile.xp.toLocaleString()} XP</div>
+                                            </div>
+                                            <div className="w-full h-4 bg-black border border-white/10 relative">
+                                                <div className={`absolute top-0 left-0 h-full bg-[${C_ACCENT}]`} style={{ width: `${(profile.xp / rankData.nextRank.xp) * 100}%` }} />
+                                            </div>
+                                            <div className="text-right mt-2 text-sm font-bold text-white/50 uppercase">Next Rank: {rankData.nextRank.name} at {rankData.nextRank.xp.toLocaleString()} XP</div>
+                                        </div>
+
+                                        <div className="p-6 bg-black/50 border border-white/5 flex justify-between items-center">
+                                            <div>
+                                                <div className="text-lg font-black uppercase mb-1">Designation Registry</div>
+                                                <div className={`text-sm text-[${C_TEXT_DIM}]`}>Requires Central Command Authorization Cipher</div>
+                                            </div>
+                                            <button onClick={()=>setView('MAIN')} className={`px-6 py-3 border border-[${C_ACCENT}] text-[${C_ACCENT}] font-black uppercase hover:bg-[${C_ACCENT}] hover:text-black transition-colors`}>
+                                                Unlock Identity
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {view === 'GARAGE' && (
+                                    <div className={`${sCard} h-full flex flex-col animate-fade-in`}>
+                                        <h2 className="text-3xl font-black uppercase tracking-widest mb-8 border-l-4 border-[#00FF66] pl-4">Asset Requisition Hangar</h2>
+                                        <div className="flex-1 overflow-y-auto space-y-8 pr-4">
+                                            {Object.entries(GARAGE).map(([cat, vehi]) => (
+                                                <div key={cat}>
+                                                    <h3 className={`text-xl font-black text-[${C_TEXT_DIM}] uppercase tracking-widest mb-4`}>{cat} ASSETS</h3>
+                                                    <div className="grid grid-cols-2 gap-4">
+                                                        {vehi.map(v => (
+                                                            <div key={v.id} className={`p-6 border ${profile.unlockedVehicles.includes(v.id) ? `border-[${C_BORDER_FOCUS}] bg-black/40` : `border-red-900/30 bg-red-950/10`} tactical-mask relative overflow-hidden group`}>
+                                                                <div className="relative z-10">
+                                                                    <div className="text-xl font-black uppercase mb-2 text-white">{v.name}</div>
+                                                                    <div className={`text-sm text-[${C_TEXT_DIM}] font-bold mb-6 h-10`}>{v.desc}</div>
+                                                                    {profile.unlockedVehicles.includes(v.id) ? (
+                                                                        <button className={`w-full py-3 border border-[${C_ACCENT}] text-[${C_ACCENT}] font-black uppercase group-hover:bg-[${C_ACCENT}] group-hover:text-black transition-colors`}>
+                                                                            Authorize Role
+                                                                        </button>
+                                                                    ) : (
+                                                                        <div className="w-full py-3 border border-red-900/50 text-red-500/50 font-black uppercase flex items-center justify-center gap-2">
+                                                                            <IconLock /> Restricted
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {view === 'SETTINGS' && (
+                                    <div className={`${sCard} h-full animate-fade-in`}>
+                                        <h2 className="text-3xl font-black uppercase tracking-widest mb-8 border-l-4 border-[#00FF66] pl-4">System Parameters</h2>
+                                        <div className="space-y-6">
+                                            <div className="p-6 bg-black/40 border border-white/5">
+                                                <div className="text-lg font-black uppercase mb-4 text-[#00FF66]">Rendering Architecture (Post-Processing)</div>
+                                                <div className="flex gap-4">
+                                                    {['LOW', 'MED', 'HIGH'].map(g => (
+                                                        <button key={g} onClick={()=>setProfile(p=>({...p, settings: {...p.settings, graphics: g as any}}))} 
+                                                                className={`flex-1 py-4 font-black uppercase border ${profile.settings.graphics === g ? `bg-[#00FF66] text-black border-[#00FF66]` : 'bg-transparent border-white/20 text-white hover:border-[#00FF66]'}`}>
+                                                            {g} Fidelity
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         </div>
                     </div>
-                    
-                    {tab === 'OPS' && (
-                        <div className="flex-1 flex gap-6 overflow-x-auto pb-4 items-center justify-center pointer-events-auto">
-                            {LEVELS.map((l) => {
-                                const locked = l.id > save.unlockedLevel;
-                                return (
-                                    <div key={l.id} className="w-[24rem] h-[26rem] border flex flex-col transition-transform hover:scale-105" style={{borderColor: locked ? '#222' : C_BORDER, background: C_PANEL}}>
-                                        <div className="h-48 border-b relative flex items-center justify-center overflow-hidden" style={{borderColor: C_BORDER, background: locked?'#111':'#1A2C20'}}>
-                                            {locked ? <LockIcon /> : <TargetIcon />}
-                                        </div>
-                                        <div className="p-6 flex-1 flex flex-col justify-between">
-                                            <h3 className="text-2xl font-bold" style={{color: locked ? '#555' : 'white'}}>{l.n}</h3>
-                                            <button onClick={() => { setSelLvl(l.id); setState('GAME'); }} disabled={locked} className="w-full py-4 font-bold tracking-widest border transition-colors uppercase" style={{borderColor: C_BORDER, color: locked ? '#555' : C_TEXT}}>
-                                                {locked ? 'مقفل' : 'تأكيد النشر التكتيكي'}
-                                            </button>
-                                        </div>
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    )}
-
-                    {tab === 'HANGAR' && (
-                        <div className="flex-1 overflow-auto grid grid-cols-2 gap-6 p-4 pointer-events-auto">
-                            <div className="border border-green-700 bg-[#001a00] p-6 flex flex-col gap-4">
-                                <h2 className="text-2xl font-black text-[#00ff66] border-b border-green-800 pb-2">سرب الطائرات</h2>
-                                <button onClick={()=>setSave(s=>({...s, activeSkin: 'default'}))} className={`px-4 py-2 border ${save.activeSkin==='default'?'bg-green-900 text-white':'border-green-800'} text-[#00ff66]`}>B-2 Stealth (قياسي)</button>
-                            </div>
-                            <div className="border border-yellow-700 bg-[#1a1500] p-6 flex flex-col gap-4">
-                                <h2 className="text-2xl font-black text-yellow-500 border-b border-yellow-800 pb-2">سوق النخبة الحصري (FOMO)</h2>
-                                {[{id:'حزمة الملكي - ريال مدريد الكونية', col:'#ffdd00'}, {id:'كتيبة النخبة - برشلونة التكتيكية', col:'#ff2255'}].map(ps => (
-                                    <div key={ps.id} className="border border-yellow-800/50 p-4 flex justify-between items-center bg-black/50">
-                                        <div className="font-bold text-lg" style={{color: ps.col}}>{ps.id}</div>
-                                        <button onClick={()=>setSave(s=>({...s, activeSkin: ps.id}))} className={`px-4 py-2 border border-yellow-500 ${save.activeSkin === ps.id ? 'bg-yellow-900 text-white' : 'bg-transparent'} text-yellow-500`}>
-                                            {save.activeSkin === ps.id ? 'مُجهز' : 'تجهيز'}
-                                        </button>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                    )}
-
-                    {tab === 'LAN' && (
-                        <div className="flex-1 flex flex-col items-center justify-center p-4">
-                            <div className="w-full max-w-2xl border bg-black/80 p-8" style={{borderColor: C_BORDER}}>
-                                <h2 className="text-3xl font-black text-center mb-8 border-b pb-4 text-white" style={{borderColor: C_BORDER}}>لوحة شرف الأبطال المحلية</h2>
-                                {MOCK_LAN.map((p, i) => (
-                                    <div key={i} className={`flex justify-between p-4 mb-2 border ${p.name.includes('أنت') ? 'bg-[#003311] border-[#00FF66] font-black' : 'bg-[#2C3034] border-[#3F444A]'}`}>
-                                        <span className={p.name.includes('أنت')?'text-white':''}>{p.name}</span>
-                                        <span>{p.score.toLocaleString()} PTS</span>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                    )}
                 </div>
             )}
 
-            {state === 'GAME' && (
+            {/* ==================== GAME HUD ==================== */}
+            {view === 'GAME' && (
                 <>
                     <canvas ref={canvasRef} className="absolute inset-0 w-full h-full block" />
                     
-                    {godMsg && (
-                        <div className="absolute top-1/4 left-1/2 -translate-x-1/2 bg-yellow-500 text-black px-12 py-6 font-black text-4xl z-50 animate-pulse tracking-tighter shadow-[0_0_50px_rgba(255,200,0,0.5)] pointer-events-none">
-                            تنبيه: أنت الآن زعيم الكون العسكري
+                    {hud.state === 'SPACE_TRANSITION' && (
+                        <div className="absolute top-[20%] left-1/2 -translate-x-1/2 text-white px-12 py-6 font-black text-5xl z-50 animate-bounce tracking-widest text-center" style={{ textShadow: `0 0 30px ${C_ACCENT}` }}>
+                            ATMOSPHERIC BREACH DETECTED<br/>
+                            <span className="text-2xl mt-4 block text-gray-400">INITIATING CELESTIAL PROTOCOL</span>
                         </div>
                     )}
 
-                    {hud.state === 'CINEMATIC' && (
-                        <div className="absolute top-1/4 left-1/2 -translate-x-1/2 text-white px-12 py-6 font-black text-4xl z-50 animate-bounce tracking-widest drop-shadow-[0_0_20px_#00ff66] pointer-events-none">
-                            MILITARY OVERRIDE
-                        </div>
-                    )}
-
-                    {hud.state !== 'CINEMATIC' && (
-                        <div className="absolute inset-0 pointer-events-none flex justify-between p-6 z-10" style={{ filter: hud.camIndex === 3 && hud.state === 'AIR' ? 'grayscale(100%) contrast(1.5)' : '' }}>
+                    {hud.state === 'DEPLOYED' && (
+                        <div className="absolute inset-0 pointer-events-none flex flex-col justify-between p-8 z-10" style={{ filter: hud.camMode === 'DRONE' ? 'grayscale(80%) sepia(20%) contrast(1.5)' : '' }}>
                             
-                            <div className="flex flex-col gap-2">
-                                <div className="border px-4 py-2 font-bold tracking-widest text-sm flex gap-4 backdrop-blur-sm shadow-xl" style={{borderColor: C_BORDER, background: C_PANEL}}>
-                                    <span className={hud.godMode ? 'text-yellow-500':'text-[#00FF66]'}>SYS: {hud.camName}</span>
-                                </div>
-                                <div className="border px-4 py-2 font-bold text-xs flex flex-col gap-1 backdrop-blur-sm w-64 uppercase" style={{borderColor: C_BORDER, background: C_PANEL}}>
-                                    <span>HVT Cleared: {hud.progress}%</span>
-                                    <div className="w-full h-1 bg-black"><div className="h-full bg-[#00FF66] transition-all" style={{width: `${hud.progress}%`}}/></div>
-                                </div>
-                            </div>
-                            
-                            <div className="flex gap-4 pointer-events-auto items-start">
-                                <button onClick={() => setAudioPlay(!audioPlay)} className="border p-3 hover:bg-white/10 text-white" style={{borderColor: C_BORDER, background: C_PANEL}}>
-                                    <MusicIcon />
-                                </button>
-                                {hud.state === 'AIR' && (
-                                    <>
-                                        <button onClick={() => engineRef.current?.toggleCamera()} className="border p-3 hover:bg-white/10 text-white" style={{borderColor: C_BORDER, background: C_PANEL}}>
-                                            <CameraIcon />
-                                        </button>
-                                        {selLvl === 1 && (
-                                            <button onClick={() => engineRef.current?.triggerDismount()} className="border p-3 hover:bg-white/10 text-white" style={{borderColor: C_BORDER, background: C_PANEL}}>
-                                                <DismountIcon />
-                                            </button>
-                                        )}
-                                    </>
-                                )}
-                                {hud.state === 'GROUND' && (
-                                    <button onClick={() => engineRef.current?.triggerBoarding()} className="border p-3 hover:bg-white/10 text-white" style={{borderColor: C_BORDER, background: C_PANEL}}>
-                                        <JetIcon />
-                                    </button>
-                                )}
-                                <button onClick={() => setState('MAP')} className="border px-6 py-3 font-bold tracking-widest text-red-500 hover:bg-red-900/50 uppercase" style={{borderColor: '#522', background: '#211'}}>
-                                    Abort
-                                </button>
-                            </div>
+                            {/* Cinematic Top/Bottom Bars */}
+                            <div className="absolute top-0 left-0 right-0 h-[10%] bg-black z-0" />
+                            <div className="absolute bottom-0 left-0 right-0 h-[10%] bg-black z-0" />
 
-                            <div className="absolute inset-0 flex items-center justify-center opacity-70 pointer-events-none">
-                                <div className="w-48 h-48 relative">
-                                    <div className="absolute top-0 left-0 w-6 h-6 border-t-2 border-l-2" style={{borderColor: hud.godMode?'#ffdd00':C_TEXT}} />
-                                    <div className="absolute top-0 right-0 w-6 h-6 border-t-2 border-r-2" style={{borderColor: hud.godMode?'#ffdd00':C_TEXT}} />
-                                    <div className="absolute bottom-0 left-0 w-6 h-6 border-b-2 border-l-2" style={{borderColor: hud.godMode?'#ffdd00':C_TEXT}} />
-                                    <div className="absolute bottom-0 right-0 w-6 h-6 border-b-2 border-r-2" style={{borderColor: hud.godMode?'#ffdd00':C_TEXT}} />
-                                    <div className="absolute top-1/2 left-1/2 w-1 h-1 bg-red-500 rounded-full -translate-x-1/2 -translate-y-1/2" />
+                            {/* Top HUD */}
+                            <div className="relative z-10 flex justify-between items-start mt-[8%]">
+                                <div className="flex flex-col gap-4">
+                                    <div className={`px-6 py-3 font-black tracking-widest text-lg flex gap-4 bg-[${C_PANEL}]/80 border border-[${C_BORDER_DIM}] backdrop-blur-md uppercase text-white`}>
+                                        OPTIC LINK: <span className={`text-[${C_ACCENT}]`}>{hud.camMode}</span>
+                                    </div>
+                                    <div className={`px-6 py-4 font-bold text-sm flex flex-col gap-2 w-80 uppercase bg-[${C_PANEL}]/80 border border-red-900/50 backdrop-blur-md text-white`}>
+                                        <div className="flex justify-between">
+                                            <span>Primary Objectives</span>
+                                            <span className="text-red-500 font-black">{hud.progress}%</span>
+                                        </div>
+                                        <div className="w-full h-2 bg-black border border-red-900/30"><div className="h-full bg-red-600 transition-all" style={{width: `${hud.progress}%`}}/></div>
+                                    </div>
+                                </div>
+                                
+                                <div className="flex gap-4 pointer-events-auto">
+                                    {hud.heroMode === 'AIR' && (
+                                        <>
+                                            <button onClick={() => engineRef.current?.toggleCamera()} className={`p-4 bg-[${C_PANEL}]/80 border border-[${C_BORDER_DIM}] text-white hover:border-[${C_ACCENT}] hover:text-[${C_ACCENT}] backdrop-blur-md transition-colors`}><IconCamera /></button>
+                                            <button onClick={() => engineRef.current?.switchMode()} className={`px-6 py-4 font-black uppercase tracking-widest bg-[${C_PANEL}]/80 border border-[${C_BORDER_DIM}] text-white hover:border-[${C_ACCENT}] hover:text-[${C_ACCENT}] backdrop-blur-md transition-colors`}>Eject / Ground Insert</button>
+                                        </>
+                                    )}
+                                    {hud.heroMode === 'GROUND' && (
+                                        <button onClick={() => engineRef.current?.switchMode()} className={`px-6 py-4 font-black uppercase tracking-widest bg-[${C_PANEL}]/80 border border-[${C_BORDER_DIM}] text-white hover:border-[#00aaff] hover:text-[#00aaff] backdrop-blur-md transition-colors`}>Mount Aerospace Vehicle</button>
+                                    )}
                                 </div>
                             </div>
 
-                            <div className="absolute bottom-6 left-6 pointer-events-auto">
-                                <Joystick onMove={(x, y) => { if (engineRef.current) { engineRef.current.input.x = x; engineRef.current.input.y = y; } }} />
-                            </div>
-
-                            {hud.state === 'GROUND' && (
-                                <div className="absolute bottom-6 left-[200px] flex gap-4 pointer-events-auto">
-                                    <button onPointerDown={() => engineRef.current && (engineRef.current.sprinting = true)} onPointerUp={() => engineRef.current && (engineRef.current.sprinting = false)} className="border px-6 py-2 bg-[#2C3034] text-white font-bold select-none text-xl" style={{borderColor: C_BORDER}}>جري</button>
-                                    <button onPointerDown={() => engineRef.current && (engineRef.current.crouching = true)} onPointerUp={() => engineRef.current && (engineRef.current.crouching = false)} className="border px-6 py-2 bg-[#2C3034] text-white font-bold select-none text-xl" style={{borderColor: C_BORDER}}>جلوس</button>
+                            {/* Center Crosshair (If TPS/FPS) */}
+                            {(hud.camMode === 'TPS' || hud.camMode === 'FPS') && (
+                                <div className="absolute inset-0 flex items-center justify-center opacity-60 pointer-events-none z-10">
+                                    <div className={`w-16 h-16 text-[${hud.heroMode === 'AIR'?C_ACCENT:C_DANGER}]`}><IconCrosshair /></div>
                                 </div>
                             )}
 
-                            <div className="absolute bottom-6 right-6 flex flex-col items-center gap-4 pointer-events-auto">
-                                <div className="border border-red-900 bg-black/80 px-8 py-2 font-bold text-red-500 tracking-widest text-sm uppercase">Hellfire Core</div>
-                                <button onPointerDown={(e) => { e.stopPropagation(); engineRef.current?.fire(); }} 
-                                        className="w-28 h-28 rounded-full border-[4px] border-[#3F444A] bg-[#cc0000] shadow-[0_0_0_2px_#1A1C1E] active:scale-95 active:bg-[#ff0000] transition-all flex items-center justify-center outline-none">
-                                    <TargetIcon />
-                                </button>
+                            {/* Tactical Mechanics (Bottom) */}
+                            <div className="relative z-10 flex justify-between items-end mb-[8%] pointer-events-auto">
+                                
+                                {/* Movement Joystick */}
+                                <div 
+                                    className={`w-40 h-40 rounded-full border-2 border-[${C_BORDER_FOCUS}] bg-black/50 backdrop-blur-md touch-none flex items-center justify-center`}
+                                    onPointerDown={(e:any) => {
+                                        const r = e.currentTarget.getBoundingClientRect();
+                                        const update = (ev:any) => {
+                                            const dx = ev.clientX - (r.left + r.width/2); const dy = ev.clientY - (r.top + r.height/2);
+                                            const rad = r.width/2; const d = Math.min(Math.hypot(dx,dy), rad); const a = Math.atan2(dy,dx);
+                                            if(engineRef.current) { engineRef.current.input.x = (Math.cos(a)*d)/rad; engineRef.current.input.y = (-Math.sin(a)*d)/rad; }
+                                        };
+                                        update(e); e.currentTarget.onpointermove = update;
+                                        e.currentTarget.onpointerup = () => { if(engineRef.current) { engineRef.current.input.x=0; engineRef.current.input.y=0; } e.currentTarget.onpointermove = null; };
+                                        e.currentTarget.onpointerleave = e.currentTarget.onpointerup;
+                                    }}
+                                >
+                                    <div className={`w-12 h-12 rounded-full bg-[${C_ACCENT}]/80 shadow-[0_0_15px_${C_ACCENT}]`} />
+                                </div>
+
+                                {/* Air Controls */}
+                                {hud.heroMode === 'AIR' && (
+                                    <div className="flex-1 flex justify-center ml-12">
+                                        <button 
+                                            onPointerDown={()=>engineRef.current&&(engineRef.current.throttleActive=true)} 
+                                            onPointerUp={()=>engineRef.current&&(engineRef.current.throttleActive=false)} 
+                                            onPointerLeave={()=>engineRef.current&&(engineRef.current.throttleActive=false)} 
+                                            className={`px-16 py-6 border-2 border-[${C_ACCENT}] text-[${C_ACCENT}] font-black uppercase text-2xl tracking-widest bg-black/60 hover:bg-[${C_ACCENT}] hover:text-black transition-colors backdrop-blur-md active:scale-95`}
+                                        >
+                                            Engage Afterburners
+                                        </button>
+                                    </div>
+                                )}
+
+                                {/* Ground Controls */}
+                                {hud.heroMode === 'GROUND' && (
+                                    <div className="flex-1 flex justify-center gap-6 ml-12">
+                                        {[{id:'sprint', l:'جري'}, {id:'crouch', l:'جلوس'}].map(b => (
+                                            <button key={b.id}
+                                                onPointerDown={()=>engineRef.current&&(engineRef.current.input[b.id as 'sprint'|'crouch']=true)} 
+                                                onPointerUp={()=>engineRef.current&&(engineRef.current.input[b.id as 'sprint'|'crouch']=false)} 
+                                                onPointerLeave={()=>engineRef.current&&(engineRef.current.input[b.id as 'sprint'|'crouch']=false)} 
+                                                className={`px-10 py-5 bg-[${C_PANEL}]/80 border border-[${C_BORDER_DIM}] text-white font-black text-xl uppercase backdrop-blur-md active:bg-white active:text-black`}
+                                            >{b.l}</button>
+                                        ))}
+                                        <button onClick={()=>engineRef.current?.executeDodge()} className={`px-10 py-5 bg-[${C_PANEL}]/80 border border-[${C_BORDER_DIM}] text-white font-black text-xl uppercase backdrop-blur-md active:bg-white active:text-black`}>مراوغة</button>
+                                    </div>
+                                )}
+
+                                {/* Fire Button */}
+                                <div className="flex flex-col items-center gap-4">
+                                    <div className={`px-6 py-2 font-black text-sm tracking-widest border border-red-900/50 bg-black/80 text-red-500 uppercase`}>Weapon System Live</div>
+                                    <button 
+                                        onPointerDown={() => engineRef.current?.fire()} 
+                                        className={`w-36 h-36 rounded-full border-4 border-red-600 bg-red-950 shadow-[0_0_30px_rgba(255,0,0,0.5)] flex items-center justify-center text-red-500 active:scale-90 active:bg-red-600 active:text-black transition-all`}
+                                    >
+                                        <IconCrosshair />
+                                    </button>
+                                </div>
+                                
                             </div>
                         </div>
                     )}
                 </>
             )}
 
-            {state === 'VICTORY' && (
-                <div className="absolute inset-0 backdrop-blur-2xl flex flex-col items-center justify-center z-50 p-8" style={{background: 'rgba(26, 28, 30, 0.95)'}}>
-                    <div className="border-4 p-16 flex flex-col items-center text-center max-w-3xl w-full" style={{borderColor: '#00FF66', background: C_PANEL}}>
-                        <TargetIcon />
-                        <h2 className="text-5xl font-black mt-8 mb-4 tracking-widest text-white leading-loose">تم تطهير القطاع - النصر العسكري محقق</h2>
-                        <button onClick={()=>setState('MAP')} className="w-full py-6 mt-12 text-2xl font-black tracking-widest border border-white bg-white text-black hover:bg-gray-300 transition-colors uppercase">
-                            العودة للقيادة
+            {/* ==================== VICTORY OVERLAY ==================== */}
+            {view === 'VICTORY' && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center z-50 p-8 vignette cinematic-bars" style={{background: 'rgba(5, 5, 5, 0.95)'}}>
+                    <div className={`p-20 flex flex-col items-center text-center max-w-4xl w-full bg-[${C_PANEL}]/80 backdrop-blur-2xl border border-[${C_ACCENT}] shadow-[0_0_40px_rgba(0,255,102,0.1)]`}>
+                        <div className={`w-32 h-32 text-[${C_ACCENT}] mb-8`}><IconCrosshair /></div>
+                        <h2 className={`text-6xl font-black mb-4 tracking-widest leading-loose text-[${C_ACCENT}] glow-text`}>
+                            Sector SECURED
+                        </h2>
+                        <h3 className="text-2xl font-bold uppercase tracking-widest text-white/50 mb-16">High Value Targets Neutralized. +5000 XP Granted.</h3>
+                        <button onClick={()=>setView('MAIN')} className={`w-full py-8 text-3xl font-black tracking-widest bg-white text-black hover:bg-gray-300 transition-colors uppercase outline-none`}>
+                            Return To Central Command
                         </button>
                     </div>
                 </div>
             )}
+            
         </div>
     );
 }
